@@ -1,0 +1,26 @@
+/* src/index.css */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Poppins:wght@700;800&display=swap');
+@import "tailwindcss";
+
+/* Base app look to match your clean mock */
+html, body, #root { height: 100%; }
+body { @apply bg-neutral-50 text-neutral-900; }
+
+/* You can add custom global styles below if needed */
+
+/* Modern default typography + selection */
+html { scroll-behavior: smooth; }
+body { font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; }
+::selection { background: #34d39933; }
+
+/* Utility for gradient text (fallback if needed) */
+.gradient-text { background: linear-gradient(90deg, #34d399, #22c55e, #14b8a6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 0.3; }
+  50% { transform: scale(1.1); opacity: 0.5; }
+}
