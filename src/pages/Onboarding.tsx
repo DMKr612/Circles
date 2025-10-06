@@ -194,7 +194,7 @@ export default function Onboarding() {
           onClick={() => navigate('/profile')}
           className="text-sm font-semibold px-3 py-1.5 rounded bg-white text-indigo-700 hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-white/40"
           aria-label="Go to profile"
-        >
+        >4
           Profile
         </button>
       </div>
