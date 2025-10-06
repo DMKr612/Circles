@@ -41,6 +41,8 @@ function useAuthUser() {
 
 function Header() {
   const { user } = useAuthUser();
+  const location = useLocation();
+  const onOnboarding = location.pathname.startsWith("/onboarding");
   return (
     <header className="sticky top-0 z-40 bg-white/80 backdrop-blur border-b border-black/5">
       <div className="mx-auto max-w-6xl px-4 h-14 flex items-center justify-between">
@@ -49,47 +51,63 @@ function Header() {
           <span className="text-xl font-semibold tracking-tight">Circles</span>
         </Link>
         <nav className="flex items-center gap-3">
-          <Link
-            to="/browse"
-            className="hidden sm:inline-flex rounded-md px-3 py-2 text-sm border border-black/10 hover:bg-black/[0.04]"
-          >
-            Browse
-          </Link>
-          {user && (
+          {onOnboarding ? (
             <>
-              <Link
-                to="/create"
-                className="hidden sm:inline-flex rounded-md px-3 py-2 text-sm border border-black/10 hover:bg-black/[0.04]"
-              >
-                Create
-              </Link>
               <Link
                 to="/profile"
                 className="hidden sm:inline-flex rounded-md px-3 py-2 text-sm border border-black/10 hover:bg-black/[0.04]"
               >
                 Profile
               </Link>
-            </>
-          )}
-          {!user ? (
-            <>
-              <Link
-                to="/#auth"
-                className="rounded-md px-3 py-2 text-sm border border-black/10 hover:bg-black/[0.04]"
-              >
-                Sign In
-              </Link>
-              <Link
-                to="/#auth"
-                className="rounded-md px-3 py-2 text-sm text-white bg-emerald-700 hover:brightness-110"
-              >
-                Sign Up
-              </Link>
+              {user && (
+                <span className="text-xs text-neutral-700">{user.email}</span>
+              )}
             </>
           ) : (
-            <Link to="/profile" className="text-xs text-neutral-700 hover:text-neutral-900 underline-offset-2 hover:underline">
-              {user.email}
-            </Link>
+            <>
+              <Link
+                to="/browse"
+                className="hidden sm:inline-flex rounded-md px-3 py-2 text-sm border border-black/10 hover:bg-black/[0.04]"
+              >
+                Browse
+              </Link>
+              {user && (
+                <>
+                  <Link
+                    to="/create"
+                    className="hidden sm:inline-flex rounded-md px-3 py-2 text-sm border border-black/10 hover:bg-black/[0.04]"
+                  >
+                    Create
+                  </Link>
+                  <Link
+                    to="/profile"
+                    className="hidden sm:inline-flex rounded-md px-3 py-2 text-sm border border-black/10 hover:bg-black/[0.04]"
+                  >
+                    Profile
+                  </Link>
+                </>
+              )}
+              {!user ? (
+                <>
+                  <Link
+                    to="/#auth"
+                    className="rounded-md px-3 py-2 text-sm border border-black/10 hover:bg-black/[0.04]"
+                  >
+                    Sign In
+                  </Link>
+                  <Link
+                    to="/#auth"
+                    className="rounded-md px-3 py-2 text-sm text-white bg-emerald-700 hover:brightness-110"
+                  >
+                    Sign Up
+                  </Link>
+                </>
+              ) : (
+                <Link to="/profile" className="text-xs text-neutral-700 hover:text-neutral-900 underline-offset-2 hover:underline">
+                  {user.email}
+                </Link>
+              )}
+            </>
           )}
         </nav>
       </div>

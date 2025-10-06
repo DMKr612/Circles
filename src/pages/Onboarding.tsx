@@ -31,10 +31,10 @@ const SLIDES: Slide[] = [
     image: "/image4.png",
   },
   {
-  title: "Join Circles Now",
-  text: "Sign in to start connecting with others!",
-  image: "/image5.png",
-},
+    title: "Join Circles Now",
+    text: "Sign in to start connecting with others!",
+    image: "/image5.png",
+  },
 ];
 
 export default function Onboarding() {

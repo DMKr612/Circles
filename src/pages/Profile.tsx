@@ -284,7 +284,7 @@ useEffect(() => {
   async function openSettings() {
     if (!uid) return;
     setSettingsMsg(null);
-    // load current profile fields
+    // load current profile fieldsƒ
     const { data: p, error } = await supabase
       .from("profiles")
       .select("name, city, timezone, interests")
@@ -331,8 +331,11 @@ useEffect(() => {
   async function logout() {
     try {
       await supabase.auth.signOut();
-    } finally {
-      window.location.href = "/"; // redirect to home (change to "/login" if you have that route)
+      localStorage.removeItem("onboardingSeen");
+      window.location.href = `${window.location.origin}/onboarding`;
+    } catch (error) {
+      console.error("Logout failed:", error);
+      window.location.href = `${window.location.origin}/onboarding`;
     }
   }
   // Load friend profiles via RPC (uses auth.uid() on the server)
