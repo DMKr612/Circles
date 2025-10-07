@@ -373,13 +373,16 @@ useEffect(() => {
           .eq("user_id", _uid)
           .maybeSingle(),
         supabase
-          .from("groups")
+          .from("group_members")
           .select("*", { count: "exact", head: true })
-          .eq("host_id", _uid),
+          .eq("user_id", _uid)
+          .eq("status", "active")
+          .in("role", ["owner", "host"]),
         supabase
           .from("group_members")
           .select("*", { count: "exact", head: true })
-          .eq("user_id", _uid),
+          .eq("user_id", _uid)
+          .eq("status", "active"),
       ]);
 
       if (!off) {
@@ -399,46 +402,57 @@ useEffect(() => {
 
       // NON-BLOCKING: heavy queries in background
       (async () => {
-        // created previews (latest 5): host or membership as host
-        const [byHostId, byMembership] = await Promise.all([
-          supabase
+        // created previews (latest 5): membership role owner/host
+        const { data: createdMemberships, error: cmErr } = await supabase
+          .from("group_members")
+          .select("group_id, created_at")
+          .eq("user_id", _uid)
+          .eq("status", "active")
+          .in("role", ["owner", "host"])
+          .order("created_at", { ascending: false })
+          .limit(20);
+        if (!off && cmErr) console.warn('createdMemberships error', cmErr);
+        const createdIds = Array.from(new Set((createdMemberships ?? []).map((r: any) => r.group_id))).filter(Boolean);
+        let createdGroups: any[] = [];
+        if (createdIds.length) {
+          const { data: cg } = await supabase
             .from("groups")
             .select("id,title,game,category,created_at")
-            .eq("host_id", _uid)
+            .in("id", createdIds)
             .order("created_at", { ascending: false })
-            .limit(10),
-          supabase
-            .from("group_members")
-            .select("created_at, role, groups(id,title,game,category,created_at)")
-            .eq("user_id", _uid)
-            .eq("role", "host")
-            .order("created_at", { ascending: false })
-            .limit(10),
-        ]);
+            .limit(20);
+          createdGroups = cg ?? [];
+        }
         if (!off) {
-          const viaHostId = (byHostId.data ?? []) as any[];
-          const viaMembership = (byMembership.data ?? []).map((r: any) => r.groups).filter(Boolean) as any[];
-          const merged = [...viaHostId, ...viaMembership];
-          const seen = new Set<string>();
-          const unique = merged.filter((g: any) => {
-            if (!g?.id) return false;
-            if (seen.has(g.id)) return false;
-            seen.add(g.id);
-            return true;
-          }).slice(0, 5);
-          setCreatedPreview(unique as PreviewGroup[]);
+          const seenC = new Set<string>();
+          const uniqueC = createdGroups.filter((g: any) => g?.id && !seenC.has(g.id) && seenC.add(g.id)).slice(0, 5);
+          setCreatedPreview(uniqueC as PreviewGroup[]);
         }
 
-        // joined preview (latest joined groups)
-        const { data: joinedRows } = await supabase
+        // joined preview (latest joined groups) — any active membership
+        const { data: joinedMemberships, error: jmErr } = await supabase
           .from("group_members")
-          .select("created_at, groups(id,title,game,category,created_at)")
+          .select("group_id, created_at")
           .eq("user_id", _uid)
+          .eq("status", "active")
           .order("created_at", { ascending: false })
-          .limit(10);
+          .limit(20);
+        if (!off && jmErr) console.warn('joinedMemberships error', jmErr);
+        const joinedIds = Array.from(new Set((joinedMemberships ?? []).map((r: any) => r.group_id))).filter(Boolean);
+        let joinedGroups: any[] = [];
+        if (joinedIds.length) {
+          const { data: jg } = await supabase
+            .from("groups")
+            .select("id,title,game,category,created_at")
+            .in("id", joinedIds)
+            .order("created_at", { ascending: false })
+            .limit(20);
+          joinedGroups = jg ?? [];
+        }
         if (!off) {
-          const jp = (joinedRows ?? []).map((r: any) => r.groups).filter(Boolean) as PreviewGroup[];
-          setJoinedPreview(jp.slice(0, 5));
+          const seenJ = new Set<string>();
+          const uniqueJ = joinedGroups.filter((g: any) => g?.id && !seenJ.has(g.id) && seenJ.add(g.id)).slice(0, 5);
+          setJoinedPreview(uniqueJ as PreviewGroup[]);
         }
 
         // games played: aggregate group_members by groups.game for this user
@@ -677,9 +691,21 @@ useEffect(() => {
             count={visibleCount}
             empty="No groups yet."
           >
-            {visibleGroups.map((g) => (
-              <Row key={g.id} id={g.id} title={g.title} meta={[g.category || '–', g.game || ''].filter(Boolean).join(' · ')} />
-            ))}
+            {visibleGroups.map((g) => {
+              const gid = (g as any)?.id
+                ?? (g as any)?.group_id
+                ?? (g as any)?.group?.id
+                ?? (g as any)?.groups?.id;
+              if (!gid) return null;
+              return (
+                <Row
+                  key={gid}
+                  id={gid}
+                  title={g.title}
+                  meta={[g.category || '–', g.game || ''].filter(Boolean).join(' · ')}
+                />
+              );
+            })}
           </Card>
 
           <Card title="Friends" count={sidebarItems.length} empty="No friends yet.">
@@ -1091,6 +1117,7 @@ function Row({ id, title, meta }: { id: string; title: string; meta: string }) {
       <div>
         <Link to={`/group/${id}`} className="font-medium text-neutral-900 hover:underline">{title}</Link>
         <div className="text-xs text-neutral-600">{meta}</div>
+        <div className="text-[10px] text-neutral-400">id:{String(id).slice(0,8)}</div>
       </div>
       <Link to={`/group/${id}`} className="text-sm text-emerald-700 hover:underline">Open</Link>
     </li>

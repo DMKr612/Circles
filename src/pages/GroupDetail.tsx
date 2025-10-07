@@ -1,7 +1,9 @@
 import { useEffect, useState, useRef, type FormEvent } from "react";
 import type React from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
+
 import { supabase } from "../lib/supabase";
+console.log('[SUPABASE]', import.meta.env?.VITE_SUPABASE_URL, String((import.meta.env?.VITE_SUPABASE_ANON_KEY||'')).slice(0,8));
 
 
 // --- Types ---
@@ -33,7 +35,8 @@ type PollOption = { id: string; poll_id: string; label: string; starts_at: strin
 type Member = { user_id: string; role: string | null; name: string | null; created_at: string };
 
 export default function GroupDetail() {
-  const { id = "" } = useParams();
+  const { id = "" } = useParams<{ id: string }>();
+  console.debug("[GroupDetail] route id =", id);
   const nav = useNavigate();
 
   const [group, setGroup] = useState<Group | null>(null);
@@ -74,23 +77,34 @@ export default function GroupDetail() {
       const { data: auth } = await supabase.auth.getUser();
       if (!ignore) setMe(auth.user?.id ?? null);
 
-      const { data, error } = await supabase
-        .from("groups")
-        .select("id, host_id, title, purpose, category, capacity, visibility, is_online, online_link, location, created_at")
-        .eq("id", id)
-        .maybeSingle();
+      let row: any = null;
+      let fetchErr: any = null;
 
-      if (error) setMsg(error.message);
-      if (!ignore) setGroup((data as Group) ?? null);
+      // try a narrow select first
+      // simple: select everything to avoid schema drift issues
+      const q = await supabase
+        .from('groups')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+      if (q.error) fetchErr = q.error;
+      row = q.data as any;
+
+      if (fetchErr) {
+        console.warn('[GroupDetail] fetch error', fetchErr);
+        if (!ignore) setMsg(`${fetchErr.code||'err'}:${fetchErr.message}`);
+      }
+      if (!ignore) setGroup((row as Group) ?? null);
 
       // count active members for voting stats
-      if (data?.id) {
-        const { count } = await supabase
-          .from("group_members")
-          .select("*", { count: "exact", head: true })
-          .eq("group_id", data.id)
-          .eq("status", "active");
+      if (row?.id) {
+        const { count, error: cErr } = await supabase
+          .from('group_members')
+          .select('*', { count: 'exact', head: true })
+          .eq('group_id', row.id)
+          .eq('status', 'active');
         if (!ignore) setMemberCount(count ?? 0);
+        if (cErr) console.warn('[GroupDetail] member count error', cErr);
       }
 
       setLoading(false);
@@ -101,20 +115,32 @@ export default function GroupDetail() {
     let off = false;
     (async () => {
       if (!group?.id) { setMembers([]); return; }
-      const { data, error } = await supabase
-        .from("group_members")
-        .select("user_id, role, created_at, profiles!inner(user_id, name)")
-        .eq("group_id", group.id)
-        .eq("status", "active")
-        .order("created_at", { ascending: true });
-      if (off) return;
-      if (error) { setMembers([]); return; }
-      const arr = (data ?? []).map((r: any) => ({
+    let dataRes = await supabase
+      .from('group_members')
+      .select('user_id, role, created_at, profiles(user_id, name)')
+      .eq('group_id', group.id)
+      .eq('status', 'active')
+      .order('created_at', { ascending: true });
+
+      let rows: any[] = dataRes.data || [];
+      if (dataRes.error) {
+        // fallback without join, fetch names separately
+        const bare = await supabase
+          .from('group_members')
+          .select('user_id, role, created_at')
+          .eq('group_id', group.id)
+          .eq('status', 'active')
+          .order('created_at', { ascending: true });
+        rows = bare.data || [];
+      }
+
+      const arr = (rows ?? []).map((r: any) => ({
         user_id: r.user_id as string,
         role: (r.role as string) ?? null,
         created_at: r.created_at as string,
         name: r.profiles?.name ?? null,
       }));
+      if (off) return;
       setMembers(arr as Member[]);
       // am I a member?
       const meId = (await supabase.auth.getUser()).data.user?.id || null;
@@ -172,7 +198,7 @@ export default function GroupDetail() {
     // refresh members
     const { data } = await supabase
       .from("group_members")
-      .select("user_id, role, created_at, profiles!inner(user_id, name)")
+      .select("user_id, role, created_at, profiles(user_id, name)")
       .eq("group_id", group.id)
       .eq("status", "active")
       .order("created_at", { ascending: true });
@@ -256,22 +282,38 @@ async function removeMember(userId: string) {
     return () => { gone = true; };
   }, [group?.id]);
 
-  async function joinGroup() {
-    setMsg(null);
-    const { data: auth } = await supabase.auth.getUser();
-    if (!auth.user) { setMsg("Please sign in."); return; }
-    if (!id) { setMsg("Invalid group id"); return; }
+async function joinGroup() {
+  setMsg(null);
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) { setMsg("Please sign in."); return; }
+  if (!id) { setMsg("Invalid group id"); return; }
 
-    const { error } = await supabase
-      .from("group_members")
-      .upsert(
-        { group_id: id as string, user_id: auth.user.id, role: "member", status: "active" },
-        { onConflict: "group_id,user_id" }
-      );
+  const { error } = await supabase
+    .from("group_members")
+    .insert({ group_id: id as string, user_id: auth.user.id });
 
-    if (error) setMsg(error.message);
-    else nav(`/group/${id}`); // detail route is /group/:id
-  }
+  // ignore unique violation (already a member)
+  if (error && error.code !== "23505") { setMsg(error.message); return; }
+
+  setIsMember(true);
+
+  // refresh list + count
+  const { data } = await supabase
+    .from("group_members")
+    .select("user_id, role, created_at, profiles(user_id, name)")
+    .eq("group_id", id)
+    .eq("status", "active")
+    .order("created_at", { ascending: true });
+
+  const arr = (data ?? []).map((r: any) => ({
+    user_id: r.user_id as string,
+    role: (r.role as string) ?? null,
+    created_at: r.created_at as string,
+    name: r.profiles?.name ?? null,
+  }));
+  setMembers(arr as Member[]);
+  setMemberCount(arr.length);
+}
 
   // ===== Friend helpers =====
   function deriveStatus(row: any, me: string): FriendState {
@@ -439,7 +481,16 @@ async function removeMember(userId: string) {
       </div>
     </div>
   );
-  if (!group) return <div className="p-6">Group not found.</div>;
+  if (msg && !group && !loading) {
+    return (
+      <div className="p-6 space-y-2">
+        <div className="text-red-700 text-sm font-semibold">Error loading group</div>
+        <div className="text-xs break-words text-red-800">{msg}</div>
+        <div className="text-[10px] text-neutral-500">id={id}</div>
+      </div>
+    );
+  }
+  if (!group) return <div className="p-6">Group not found. <span className="text-xs text-neutral-500">id={id}</span></div>;
 
 return (
 <>
@@ -510,7 +561,9 @@ return (
                 <div className="mt-1 text-xs text-neutral-500">Created {new Date(group!.created_at).toLocaleDateString()} • Host: {members.find(m => m.user_id === group!.host_id)?.name || group!.host_id.slice(0,6)}</div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <button onClick={joinGroup} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">Join</button>
+                {!isMember && (
+                  <button onClick={joinGroup} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">Join</button>
+                )}
                 {isMember && me !== group!.host_id && (
                   <button onClick={leaveGroup} className="rounded-lg border border-black/10 bg-white px-3 py-1.5 text-sm font-medium hover:bg-black/[0.04]">Leave</button>
                 )}
@@ -598,8 +651,8 @@ return (
           <label className="mt-3 block text-sm">Options (one per line)</label>
           <textarea value={newOptions} onChange={(e) => setNewOptions(e.target.value)} rows={6} placeholder={"Sat 19:00 @ Tacheles\nSun 18:00 @ Niko Club"} className="mt-1 w-full rounded border border-black/10 px-3 py-2 text-sm dark:border-white/10 dark:bg-neutral-800 dark:text-gray-100" />
           <div className="mt-4 flex justify-end gap-2">
-            <button onClick={() => setCreateOpen(false)} className="rounded-md border px-3 py-1.5 text-sm">Cancel</button>
-            <button onClick={confirmCreateVoting} className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm text-white">Create</button>
+            <button type="button" onClick={() => setCreateOpen(false)} className="rounded-md border px-3 py-1.5 text-sm">Cancel</button>
+            <button type="button" onClick={confirmCreateVoting} className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm text-white">Create</button>
           </div>
         </div>
       </div>
@@ -677,6 +730,13 @@ function ChatPanel({ groupId, onClose, full, setFull }: { groupId: string; onClo
   const [typingUsers, setTypingUsers] = useState<Record<string, { name: string; ts: number }>>({});
   const typingTimeoutRef = useRef<number | null>(null);
 
+  // keyset pagination state for chat history
+  const [oldestTs, setOldestTs] = useState<string | null>(null);
+  const [oldestId, setOldestId] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState<boolean>(true);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
+  const PAGE_SIZE = 50;
+
   // Load my id and my name
   useEffect(() => {
     (async () => {
@@ -690,31 +750,43 @@ function ChatPanel({ groupId, onClose, full, setFull }: { groupId: string; onClo
     })();
   }, []);
 
-  // load history
+  // load history (latest first, then render ascending)
   useEffect(() => {
     let ignore = false;
     setInitialLoading(true);
     (async () => {
+      // fetch newest PAGE_SIZE messages with keyset-friendly ordering
       const { data, error } = await supabase
         .from("group_messages")
         .select("id, group_id, user_id, content, created_at")
         .eq("group_id", groupId)
-        .order("created_at", { ascending: true });
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(PAGE_SIZE);
 
-      if (error) { setErr(error.message); setInitialLoading(false); return; }
+      if (error) { if (!ignore) { setErr(error.message); setInitialLoading(false); } return; }
       if (ignore) { setInitialLoading(false); return; }
 
-      const arr = (data ?? []).map((m: any) => ({
-        id: m.id,
-        group_id: m.group_id,
-        user_id: m.user_id,
-        content: m.content ?? "",
-        created_at: m.created_at,
+      const desc = (data ?? []).map((m: any) => ({
+        id: m.id as string,
+        group_id: m.group_id as string,
+        user_id: m.user_id as string,
+        content: (m.content ?? "") as string,
+        created_at: m.created_at as string,
       }));
-      setMsgs(arr as Message[]);
+
+      // compute cursor from oldest item of this page (which is the last in desc list)
+      const oldest = desc[desc.length - 1] || null;
+      setOldestTs(oldest ? oldest.created_at : null);
+      setOldestId(oldest ? oldest.id : null);
+      setHasMore((desc.length === PAGE_SIZE));
+
+      // render ascending for UI
+      const asc = [...desc].reverse();
+      setMsgs(asc as Message[]);
 
       // fetch distinct user names once
-      const uids = Array.from(new Set(arr.map(m => m.user_id)));
+      const uids = Array.from(new Set(asc.map(m => m.user_id)));
       if (uids.length) {
         const { data: profs } = await supabase
           .from("profiles")
@@ -728,6 +800,45 @@ function ChatPanel({ groupId, onClose, full, setFull }: { groupId: string; onClo
     })();
     return () => { ignore = true; };
   }, [groupId]);
+
+  // fetch older pages
+  async function loadOlder() {
+    if (!hasMore || loadingMore || !oldestTs || !oldestId) return;
+    setLoadingMore(true);
+    setErr(null);
+
+    // keyset condition: created_at < cursor OR (created_at = cursor AND id < cursorId)
+    const { data, error } = await supabase
+      .from("group_messages")
+      .select("id, group_id, user_id, content, created_at")
+      .eq("group_id", groupId)
+      .or(`created_at.lt.${oldestTs},and(created_at.eq.${oldestTs},id.lt.${oldestId})`)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(PAGE_SIZE);
+
+    if (error) { setErr(error.message); setLoadingMore(false); return; }
+
+    const desc = (data ?? []).map((m: any) => ({
+      id: m.id as string,
+      group_id: m.group_id as string,
+      user_id: m.user_id as string,
+      content: (m.content ?? "") as string,
+      created_at: m.created_at as string,
+    }));
+
+    // update cursor from the new oldest item (last in desc)
+    const newOldest = desc[desc.length - 1] || null;
+    setOldestTs(newOldest ? newOldest.created_at : oldestTs);
+    setOldestId(newOldest ? newOldest.id : oldestId);
+    setHasMore(desc.length === PAGE_SIZE);
+
+    // prepend older messages (convert to ascending order before merge)
+    const asc = [...desc].reverse();
+    setMsgs(prev => [...asc, ...prev]);
+
+    setLoadingMore(false);
+  }
 
   // realtime (messages + typing)
   useEffect(() => {
@@ -777,8 +888,9 @@ function ChatPanel({ groupId, onClose, full, setFull }: { groupId: string; onClo
 
   // autoscroll
   useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
-  }, [msgs.length]);
+  if (loadingMore) return;
+  listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
+}, [msgs.length, loadingMore]);
 
   async function send(e: FormEvent) {
     e.preventDefault();
@@ -826,6 +938,18 @@ function ChatPanel({ groupId, onClose, full, setFull }: { groupId: string; onClo
 
           {/* Messages */}
           <div ref={listRef} className="flex-1 overflow-y-auto bg-neutral-50 px-3 py-3">
+            {/* Load older */}
+            {hasMore && !initialLoading && (
+              <div className="mb-2 flex justify-center">
+                <button
+                  onClick={loadOlder}
+                  disabled={loadingMore}
+                  className="rounded-md border border-black/10 bg-white px-3 py-1.5 text-xs hover:bg-black/5 disabled:opacity-60"
+                >
+                  {loadingMore ? 'Loading…' : 'Load older'}
+                </button>
+              </div>
+            )}
             {msgs.map(m => {
               const mine = myId && m.user_id === myId;
               const name = profileMap[m.user_id] ?? m.user_id.slice(0,6);
@@ -840,7 +964,7 @@ function ChatPanel({ groupId, onClose, full, setFull }: { groupId: string; onClo
               );
             })}
             {msgs.length === 0 && !initialLoading && (
-              <div className="text-center text-sm text-neutral-500">No messages yet. Say hi 👋</div>
+              <div className="text-center text-sm text-neutral-500">No messages yet.</div>
             )}
             {initialLoading && (
               <div className="flex justify-center py-6 text-neutral-400">

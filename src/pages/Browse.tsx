@@ -280,10 +280,10 @@ const [err, setErr] = useState<string | null>(null);
               <span className="pointer-events-none absolute left-3 top-2.5 text-neutral-400">🔎</span>
             </div>
             <Link
-              to="/groups/mine"
+              to="/groups"
               className="rounded-md border border-black/10 bg-white px-4 py-2 text-sm hover:bg-black/[0.04]"
             >
-              My Games
+              My Groups
             </Link>
           </div>
 
@@ -352,51 +352,41 @@ const [err, setErr] = useState<string | null>(null);
           {err ? (
             <div className="p-6 text-red-700">{err}</div>
           ) : loading && groups.length === 0 ? (
-            <ul className="divide-y divide-black/5">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <li key={i} className="p-4 flex items-center justify-between">
-                  <div className="w-full">
-                    <div className="h-4 w-48 animate-pulse rounded bg-neutral-200" />
-                    <div className="mt-2 h-3 w-5/6 animate-pulse rounded bg-neutral-200" />
-                    <div className="mt-1 h-3 w-2/3 animate-pulse rounded bg-neutral-200" />
-                  </div>
-                  <div className="h-8 w-20 animate-pulse rounded bg-neutral-200" />
-                </li>
-              ))}
-            </ul>
+            <div className="p-6 text-neutral-500">Loading…</div>
           ) : groups.length === 0 ? (
-            <div className="p-6 text-neutral-600">No groups yet.</div>
+            <div className="p-6 text-neutral-500">No groups found.</div>
           ) : (
             <>
-              <ul className="divide-y divide-black/5">
-                {groups.map((g) => (
-                  <li key={g.id} className="p-4 flex items-center justify-between">
-                    <div>
-                      {(() => {
-                        const meta = GAME_MAP[(g.game || "").toLowerCase()];
-                        const tag = meta?.tag ?? (g.category ? String(g.category) : "general");
-                        const gameName = meta?.name ?? (g.game ? String(g.game) : null);
-                        return (
-                          <>
-                            <div className="font-medium">{g.title ?? gameName ?? "Untitled group"}</div>
-                            <div className="text-sm text-neutral-600">
-                              {`#${tag}`}
-                              {gameName ? ` • ${gameName}` : ""}
-                              {g.city ? ` • ${g.city}` : ""}
-                              {g.capacity ? ` • ${g.capacity} slots` : ""}
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </div>
-                    <Link
-                      to={`/group/${g.id}`}
-                      className="rounded-md border border-black/10 bg-white px-3 py-1.5 text-sm hover:bg-black/[0.04]"
-                    >
-                      View
-                    </Link>
-                  </li>
-                ))}
+              <ul>
+                {groups.map((g) => {
+                  const gid = (g as any)?.id
+                    ?? (g as any)?.group_id
+                    ?? (g as any)?.group?.id
+                    ?? (g as any)?.groups?.id;
+                  if (!gid) return null;
+                  return (
+                    <li key={gid} className="border-t border-black/5 px-6 py-4 first:border-none">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="font-semibold text-neutral-900">{g.title}</div>
+                          <div className="text-sm text-neutral-600">{g.description}</div>
+                          <div className="text-xs text-neutral-400">
+                            {g.city && <span>{g.city} · </span>}
+                            {g.category && <span>{g.category}</span>}
+                          </div>
+                          {/* debug id while fixing routes; remove later */}
+                          <div className="text-[10px] text-neutral-400">id:{String(gid).slice(0,8)}</div>
+                        </div>
+                        <Link
+                          to={`/group/${gid}`}
+                          className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+                        >
+                          View
+                        </Link>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
               {hasMore && (
                 <div className="border-t border-black/5 p-4 text-center">

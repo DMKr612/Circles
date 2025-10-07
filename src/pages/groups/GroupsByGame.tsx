@@ -36,7 +36,7 @@ export default function GroupsByGame() {
       const { data, error } = await supabase
         .from('groups')
         .select('*')
-        .eq('game_slug', key)
+        .eq('game', key)
         .order('created_at', { ascending: false })
         .limit(100);
       if (!mounted) return;

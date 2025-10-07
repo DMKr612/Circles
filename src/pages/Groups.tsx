@@ -98,7 +98,7 @@ export default function GroupsPage() {
           }
         } else {
           const leaf = catLower.replace(/[^a-z0-9]+/g, "");
-          queryBuilder = queryBuilder.or(`game_slug.eq.${leaf},game.ilike.%${catLower}%,title.ilike.%${catLower}%`);
+          queryBuilder = queryBuilder.or(`game.eq.${leaf},game.ilike.%${catLower}%,title.ilike.%${catLower}%`);
         }
       }
       if (search.trim()) {
@@ -212,19 +212,20 @@ export default function GroupsPage() {
   }, [category, search, modeJoined, modeCreated, me, allowedByCat]);
 
   async function handleJoin(groupId: string) {
-    if (!me) {
-      alert("Please sign in to join groups.");
-      return;
-    }
-    const { error } = await supabase
-      .from("group_members")
-      .upsert({ group_id: groupId, user_id: me, role: "member" });
-    if (error) {
-      alert(error.message);
-      return;
-    }
-    navigate(`/group/${groupId}`);
+  if (!me) {
+    alert("Please sign in to join groups.");
+    return;
   }
+  const { error } = await supabase
+    .from("group_members")
+    .insert({ group_id: groupId, user_id: me }); // let defaults set status/role
+  // ignore unique violation (already a member)
+  if (error && error.code !== "23505") {
+    alert(error.message);
+    return;
+  }
+  navigate(`/group/${groupId}`);
+}
 
   async function createPollFor(groupId: string) {
     if (!me) { alert("Please sign in."); return; }
@@ -261,7 +262,7 @@ export default function GroupsPage() {
         <div className="flex items-center gap-2">
           <Link to="/browse" className="text-sm underline">Back</Link>
           <Link
-            to="/groups/new"
+            to="/create"
             className="rounded-md bg-emerald-700 px-3 py-1.5 text-sm text-white hover:brightness-110"
           >
             New Group
@@ -327,7 +328,7 @@ export default function GroupsPage() {
                   className="hidden"
                 />
                 <button
-                  onClick={() => (async () => { /* load next page */ const mounted = true; try { setPaging(true); const from = (page + 1) * PAGE_SIZE; const to = from + PAGE_SIZE - 1; let rows: GroupRow[] = []; if (modeCreated && me) { let q = supabase.from('groups').select('id, title, description, city, capacity, category, game, created_at, host_id').eq('host_id', me).order('created_at', { ascending: false }).range(from, to); const { data, error } = await ( (qb:any)=>{ let b=qb; const catLower = category?category.toLowerCase():''; const HIGH_LEVEL = new Set(['games','study','outdoors']); if (catLower){ if (HIGH_LEVEL.has(catLower)){ const ids = allowedByCat[catLower]??[]; if (ids.length>0){ const inList = ids.map(s=>`"${s}"`).join(','); b=b.or(`game.in.(${inList}),category.eq.${catLower}`);} else { b=b.eq('category', catLower);} } else { const leaf = catLower.replace(/[^a-z0-9]+/g,''); b=b.or(`game_slug.eq.${leaf},game.ilike.%${catLower}%,title.ilike.%${catLower}%`);} } if (search.trim()){ const q=search.trim(); b=b.or(`title.ilike.%${q}%,game.ilike.%${q}%`);} return b; })(q); if (error) throw error; rows = (data??[]) as GroupRow[]; } else if (modeJoined && me) { const { data: mem } = await supabase.from('group_members').select('group_id').eq('user_id', me); const ids = (mem??[]).map((m:any)=>m.group_id); if (ids.length>0){ let q = supabase.from('groups').select('id, title, description, city, capacity, category, game, created_at, host_id').in('id', ids).order('created_at', { ascending: false }).range(from, to); const { data, error } = await ( (qb:any)=>{ let b=qb; const catLower = category?category.toLowerCase():''; const HIGH_LEVEL = new Set(['games','study','outdoors']); if (catLower){ if (HIGH_LEVEL.has(catLower)){ const ids = allowedByCat[catLower]??[]; if (ids.length>0){ const inList = ids.map(s=>`"${s}"`).join(','); b=b.or(`game.in.(${inList}),category.eq.${catLower}`);} else { b=b.eq('category', catLower);} } else { const leaf = catLower.replace(/[^a-z0-9]+/g,''); b=b.or(`game_slug.eq.${leaf},game.ilike.%${catLower}%,title.ilike.%${catLower}%`);} } if (search.trim()){ const q=search.trim(); b=b.or(`title.ilike.%${q}%,game.ilike.%${q}%`);} return b; })(q); if (error) throw error; rows = (data??[]) as GroupRow[]; } }
+                  onClick={() => (async () => { /* load next page */ const mounted = true; try { setPaging(true); const from = (page + 1) * PAGE_SIZE; const to = from + PAGE_SIZE - 1; let rows: GroupRow[] = []; if (modeCreated && me) { let q = supabase.from('groups').select('id, title, description, city, capacity, category, game, created_at, host_id').eq('host_id', me).order('created_at', { ascending: false }).range(from, to); const { data, error } = await ( (qb:any)=>{ let b=qb; const catLower = category?category.toLowerCase():''; const HIGH_LEVEL = new Set(['games','study','outdoors']); if (catLower){ if (HIGH_LEVEL.has(catLower)){ const ids = allowedByCat[catLower]??[]; if (ids.length>0){ const inList = ids.map(s=>`"${s}"`).join(','); b=b.or(`game.in.(${inList}),category.eq.${catLower}`);} else { b=b.eq('category', catLower);} } else { const leaf = catLower.replace(/[^a-z0-9]+/g,''); b=b.or(`game.eq.${leaf},game.ilike.%${catLower}%,title.ilike.%${catLower}%`);} } if (search.trim()){ const q=search.trim(); b=b.or(`title.ilike.%${q}%,game.ilike.%${q}%`);} return b; })(q); if (error) throw error; rows = (data??[]) as GroupRow[]; } else if (modeJoined && me) { const { data: mem } = await supabase.from('group_members').select('group_id').eq('user_id', me); const ids = (mem??[]).map((m:any)=>m.group_id); if (ids.length>0){ let q = supabase.from('groups').select('id, title, description, city, capacity, category, game, created_at, host_id').in('id', ids).order('created_at', { ascending: false }).range(from, to); const { data, error } = await ( (qb:any)=>{ let b=qb; const catLower = category?category.toLowerCase():''; const HIGH_LEVEL = new Set(['games','study','outdoors']); if (catLower){ if (HIGH_LEVEL.has(catLower)){ const ids = allowedByCat[catLower]??[]; if (ids.length>0){ const inList = ids.map(s=>`"${s}"`).join(','); b=b.or(`game.in.(${inList}),category.eq.${catLower}`);} else { b=b.eq('category', catLower);} } else { const leaf = catLower.replace(/[^a-z0-9]+/g,''); b=b.or(`game.eq.${leaf},game.ilike.%${catLower}%,title.ilike.%${catLower}%`);} } if (search.trim()){ const q=search.trim(); b=b.or(`title.ilike.%${q}%,game.ilike.%${q}%`);} return b; })(q); if (error) throw error; rows = (data??[]) as GroupRow[]; } }
                   else { let q = supabase.from('groups').select('id, title, description, city, capacity, category, game, created_at, host_id').order('created_at', { ascending: false }).range(from, to); const { data, error } = await ( (qb:any)=>{ let b=qb; const catLower = category?category.toLowerCase():''; const HIGH_LEVEL = new Set(['games','study','outdoors']); if (catLower){ if (HIGH_LEVEL.has(catLower)){ const ids = allowedByCat[catLower]??[]; if (ids.length>0){ const inList = ids.map(s=>`"${s}"`).join(','); b=b.or(`game.in.(${inList}),category.eq.${catLower}`);} else { b=b.eq('category', catLower);} } else { const leaf = catLower.replace(/[^a-z0-9]+/g,''); b=b.or(`game_slug.eq.${leaf},game.ilike.%${catLower}%,title.ilike.%${catLower}%`);} } if (search.trim()){ const q=search.trim(); b=b.or(`title.ilike.%${q}%,game.ilike.%${q}%`);} return b; })(q); if (error) throw error; rows = (data??[]) as GroupRow[]; } setGroups(prev => [...prev, ...rows]); setPage(p => p + 1); setHasMore(rows.length === PAGE_SIZE); const ids = rows.map((g: GroupRow)=>g.id); if (ids.length){ const { data: polls } = await supabase.from('group_polls').select('group_id').in('group_id', ids).eq('status','open'); const map: Record<string, boolean> = {}; (polls??[]).forEach((p:any)=>{ map[p.group_id]=true; }); setOpenPolls(prev=>({ ...prev, ...map })); } } finally { setPaging(false); } })()}
                   className="inline-flex items-center gap-2 rounded-md border border-black/10 bg-white px-3 py-1.5 text-sm hover:bg-black/[0.04]"
                   disabled={paging}

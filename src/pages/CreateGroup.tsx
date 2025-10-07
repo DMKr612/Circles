@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
-import { useLocation, useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 
 type Cat = { name: string };
 type Opt = { id: string; label: string; category: string };
 
 export default function CreateGroupPage() {
   const navigate = useNavigate();
-  const location = useLocation();
-  const s = (location.state as any) || {};
-  const presetCategory = (s.presetCategory as string | undefined) ?? "Games";
-  const presetGame = (s.presetGame as string | undefined) ?? "";
+  const presetCategory = "Games";
+  const presetGame = "";
 
   const [cats, setCats] = useState<Cat[]>([]);
   const [opts, setOpts] = useState<Opt[]>([]);
@@ -49,7 +47,7 @@ export default function CreateGroupPage() {
     if (!cats.length) return;
     const label = String(presetCategory || cats[0].name);
     const match = cats.find(c => c.name.toLowerCase() === label.toLowerCase());
-    setCategory(match?.name || cats[0].name);
+    setCategory((match?.name || cats[0].name).toLowerCase());
   }, [cats, presetCategory]);
 
   const [gameOpen, setGameOpen] = useState(false);
@@ -57,10 +55,11 @@ export default function CreateGroupPage() {
   const [gameId, setGameId] = useState<string>("");
   useEffect(() => {
     if (!opts.length) return;
+    if (!category) return;
     const preset = String(presetGame || "").toLowerCase().replace(/\s+/g, "");
     const found = opts.find(o => o.id === preset || o.label.toLowerCase().replace(/\s+/g, "") === preset);
     if (found) setGameId(found.id);
-  }, [opts, presetGame]);
+  }, [opts, presetGame, category]);
 
   const catOptions = useMemo(() => {
     const q = catQuery.trim().toLowerCase();
@@ -69,7 +68,7 @@ export default function CreateGroupPage() {
   }, [catQuery, cats]);
 
   const gameOptions = useMemo(() => {
-    const list = opts.filter(o => o.category === category);
+    const list = opts.filter(o => o.category.toLowerCase() === (category || "").toLowerCase());
     const q = gameQuery.trim().toLowerCase();
     return q ? list.filter((o) => o.label.toLowerCase().includes(q) || o.id.includes(q)) : list;
   }, [category, gameQuery, opts]);
@@ -87,17 +86,15 @@ export default function CreateGroupPage() {
 
     const cap = Math.max(3, Math.min(12, capacity));
 
+    // insert only columns that certainly exist; let triggers/defaults handle the rest
     const row = {
       title: title.trim(),
-      description: description.trim() || null,
-      city: city.trim() || null,
+      purpose: description.trim() || null,   // maps UI description -> DB "purpose"
       category: (category || "").toLowerCase(),
-      game: gameId,              // canonical slug
-      capacity: cap,                  // enforce >= 3 and <= 12 by UI
-      host_id: uid,              // required for RLS + host-only polls
-      creator_id: uid,           // REQUIRED by schema (NOT NULL)
-      is_online: true,
-      quick_match: false,
+      game: gameId,                          // allowed_games.id
+      capacity: cap,
+      visibility: 'public',                  // baseline readable
+      host_id: uid,                          // required for RLS/host policies
     } as const;
 
     const { data: created, error } = await supabase
@@ -105,20 +102,16 @@ export default function CreateGroupPage() {
       .insert(row)
       .select("id")
       .single();
+
     if (error) {
       alert(error.message);
       return;
     }
 
-    // Add creator as a member (role/status must match enums)
-    await supabase.from("group_members").upsert({
-      group_id: created.id,
-      user_id: uid,
-      role: "member",
-      status: "active",
-    });
+    // Do NOT upsert membership manually; trigger adds owner automatically.
 
-    navigate(`/groups/game/${encodeURIComponent(gameId)}`);
+    // Go straight to detail page of the newly created group
+    navigate(`/group/${created.id}`);
   }
 
   return (
@@ -164,7 +157,7 @@ export default function CreateGroupPage() {
                     key={label}
                     type="button"
                     onClick={() => {
-                      setCategory(label);
+                      setCategory(label.toLowerCase());
                       setCatOpen(false);
                       setCatQuery("");
                       if (!opts.some(o => o.category === label && o.id === gameId)) setGameId("");
@@ -184,12 +177,12 @@ export default function CreateGroupPage() {
           <label className="block text-sm font-medium text-neutral-800">Game / Activity</label>
           <div className="relative mt-1">
             <input
-              value={gameOpen ? gameQuery : (opts.find((o) => o.category === category && o.id === gameId)?.label || "")}
+              value={gameOpen ? gameQuery : (opts.find((o) => o.category.toLowerCase() === (category || "").toLowerCase() && o.id === gameId)?.label || "")}
               onChange={(e) => { setGameOpen(true); setGameQuery(e.target.value); }}
               onFocus={() => setGameOpen(true)}
               placeholder="Search or choose game/activity…"
               className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-emerald-500"
-              disabled={listsLoading || !category}
+              disabled={listsLoading || !(category && category.trim().length > 0)}
             />
             {gameOpen && (
               <div className="absolute z-10 mt-1 max-h-56 w-full overflow-auto rounded-lg border bg-white shadow">
@@ -227,13 +220,13 @@ export default function CreateGroupPage() {
           <label className="block text-sm font-medium text-neutral-800">Capacity</label>
           <input
             type="number"
-            min={2}
+            min={3}
             max={12}
             value={capacity}
-            onChange={(e) => setCapacity(Math.max(2, Math.min(12, Number(e.target.value || 2))))}
+            onChange={(e) => setCapacity(Math.max(3, Math.min(12, Number(e.target.value || 3))))}
             className="mt-1 w-32 rounded-lg border px-3 py-2 text-sm outline-none focus:border-emerald-500"
           />
-          <p className="mt-1 text-xs text-neutral-500">Must be between 2 and 12.</p>
+          <p className="mt-1 text-xs text-neutral-500">Must be between 3 and 12.</p>
         </div>
 
         {/* Description */}

@@ -13,27 +13,27 @@ const SLIDES: Slide[] = [
   {
     title: "Welcome to Circles",
     text: "Create and join micro-groups for games, study, and local meetups.",
-    image: "/image2.png",
+    image: "../image2.png",
   },
   {
     title: "Find Your People",
     text: "Match by interests. See active circles. Join in two taps.",
-    image: "/image3.png",
+    image: "../image3.png",
   },
   {
     title: "Chat & Organize",
     text: "Lightweight DMs, clean group chats, quick polls and events.",
-    image: "/image.png",
+    image: "../image.png",
   },
   {
     title: "Privacy First",
     text: "You choose what to share. RLS-secured backend powered by Supabase.",
-    image: "/image4.png",
+    image: "../image4.png",
   },
   {
     title: "Join Circles Now",
     text: "Sign in to start connecting with others!",
-    image: "/image5.png",
+    image: "../image5.png",
   },
 ];
 
@@ -41,8 +41,6 @@ export default function Onboarding() {
   const [index, setIndex] = useState(0);
   const [imgOk, setImgOk] = useState<boolean | null>(null);
   const [email, setEmail] = useState("");
-  const [sending, setSending] = useState(false);
-  const [authMsg, setAuthMsg] = useState<string | null>(null);
   const [authErr, setAuthErr] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
@@ -115,31 +113,9 @@ export default function Onboarding() {
 
   const redirectTo = `${window.location.origin}/profile`;
 
-  async function sendMagic(e?: React.FormEvent) {
-    if (e) e.preventDefault();
-    setAuthErr(null);
-    setAuthMsg(null);
-    if (!email.trim()) { setAuthErr("Enter your email"); return; }
-    try {
-      setSending(true);
-      const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
-        options: { emailRedirectTo: redirectTo },
-      });
-      if (error) throw error;
-      localStorage.setItem("onboardingSeen", "1");
-      setAuthMsg("Check your email for the sign-in link.");
-    } catch (err: any) {
-      setAuthErr(err?.message ?? "Failed to send link");
-    } finally {
-      setSending(false);
-    }
-  }
-
   async function loginFacebook() {
     try {
       setAuthErr(null);
-      setAuthMsg(null);
       localStorage.setItem("onboardingSeen", "1");
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "facebook",
@@ -154,7 +130,6 @@ export default function Onboarding() {
   async function submitCreds(e: React.FormEvent) {
     e.preventDefault();
     setAuthErr(null);
-    setAuthMsg(null);
     if (!email.trim() || !password.trim()) {
       setAuthErr("Enter email and password");
       return;
@@ -185,19 +160,7 @@ export default function Onboarding() {
       className="h-screen w-screen bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 text-white flex flex-col"
       aria-label="Onboarding"
     >
-      {/* Top bar: email on the left, Profile button on the right */}
-      <div className="flex items-center justify-between p-4">
-        <div className="text-sm font-medium truncate max-w-[70%]">
-          {userEmail || ""}
-        </div>
-        <button
-          onClick={() => navigate('/profile')}
-          className="text-sm font-semibold px-3 py-1.5 rounded bg-white text-indigo-700 hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-white/40"
-          aria-label="Go to profile"
-        >4
-          Profile
-        </button>
-      </div>
+
 
       {/* Slide area */}
       <div className="flex-1 flex flex-col items-center justify-center px-6">
@@ -238,7 +201,7 @@ export default function Onboarding() {
                   {!showEmailForm ? (
                     <div className="grid grid-cols-1 gap-3">
                       <button
-                        onClick={() => { setShowEmailForm(true); setAuthErr(null); setAuthMsg(null); }}
+                        onClick={() => { setShowEmailForm(true); setAuthErr(null); }}
                         className="w-full rounded-lg bg-white text-indigo-700 px-4 py-3 font-semibold"
                       >
                         Continue with Email
@@ -289,7 +252,6 @@ export default function Onboarding() {
                       </button>
                     </form>
                   )}
-                  {authMsg && <div className="mt-3 rounded border border-white/25 bg-white/10 px-3 py-2 text-sm">{authMsg}</div>}
                   {authErr && <div className="mt-3 rounded border border-red-200 bg-red-50/90 px-3 py-2 text-sm text-red-800">{authErr}</div>}
                 </div>
               )}
