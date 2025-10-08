@@ -76,83 +76,60 @@ function RequireAuth({ children }: PropsWithChildren) {
 }
 
 /* =========================
-   Header (minimal; no auto-redirects)
+   HomeButton
    ========================= */
-function Header() {
+function HomeButton() {
+  return (
+    <div className="fixed top-4 left-4 z-50">
+      <Link
+        to="/onboarding"
+        className="flex items-center justify-center h-10 w-10 rounded-full border border-black/10 bg-white/90 text-xl shadow-md hover:bg-black/[0.04]"
+        aria-label="Onboarding"
+        title="Onboarding"
+      >
+        🎯
+      </Link>
+    </div>
+  );
+}
+
+function FloatingNav() {
   const { user } = useAuth();
   const location = useLocation();
   const onOnboarding = location.pathname.startsWith("/onboarding");
+
+  // Hide on onboarding, and when not authenticated
+  if (!user || onOnboarding) return null;
+
   return (
-    <header className="sticky top-0 z-40 bg-white/80 backdrop-blur border-b border-black/5">
-      <div className="mx-auto max-w-6xl px-4 h-14 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link
-            to="/profile"
-            className="flex items-center justify-center h-8 w-8 rounded-full border border-black/10 text-neutral-600 hover:bg-black/5"
-          >
-            ←
-          </Link>
-          <Link to="/onboarding" className="flex items-center gap-2">
-            <span className="grid h-8 w-8 place-items-center rounded-full bg-emerald-700 text-white font-bold">c</span>
-            <span className="text-xl font-semibold tracking-tight">Circles</span>
-          </Link>
-        </div>
-        <nav className="flex items-center gap-3">
-          {onOnboarding ? (
-            <>
-              <Link
-                to="/profile"
-                className="hidden sm:inline-flex rounded-md px-3 py-2 text-sm border border-black/10 hover:bg-black/[0.04]"
-              >
-                Profile
-              </Link>
-              {user && <span className="text-xs text-neutral-700">{user.email}</span>}
-            </>
-          ) : (
-            <>
-              <Link
-                to="/browse"
-                className="hidden sm:inline-flex rounded-md px-3 py-2 text-sm border border-black/10 hover:bg-black/[0.04]"
-              >
-                Browse
-              </Link>
-              {user ? (
-                <>
-                  <Link
-                    to="/create"
-                    className="hidden sm:inline-flex rounded-md px-3 py-2 text-sm border border-black/10 hover:bg-black/[0.04]"
-                  >
-                    Create
-                  </Link>
-                  <Link
-                    to="/profile"
-                    className="hidden sm:inline-flex rounded-md px-3 py-2 text-sm border border-black/10 hover:bg-black/[0.04]"
-                  >
-                    Profile
-                  </Link>
-                  <span className="text-xs text-neutral-700">{user.email}</span>
-                </>
-              ) : (
-                <>
-                  <Link
-                    to="/onboarding#auth"
-                    className="rounded-md px-3 py-2 text-sm border border-black/10 hover:bg-black/[0.04]"
-                  >
-                    Sign In
-                  </Link>
-                  <Link
-                    to="/onboarding#auth"
-                    className="rounded-md px-3 py-2 text-sm text-white bg-emerald-700 hover:brightness-110"
-                  >
-                    Sign Up
-                  </Link>
-                </>
-              )}
-            </>
-          )}
-        </nav>
-      </div>
-    </header>
+    <div className="fixed inset-x-0 bottom-4 z-[60] flex items-center justify-center pointer-events-none">
+      <nav className="pointer-events-auto flex items-center gap-4 rounded-full border border-black/10 bg-white/90 backdrop-blur px-4 py-2 shadow-lg">
+        <Link
+          to="/browse"
+          className="grid h-12 w-12 place-items-center rounded-full border border-black/10 hover:bg-black/[0.04]"
+          aria-label="Browse"
+          title="Browse"
+        >
+          <span className="text-2xl">🔍</span>
+        </Link>
+        <Link
+          to="/"
+          className="grid h-12 w-12 place-items-center rounded-full border border-black/10 hover:bg-black/[0.04]"
+          aria-label="Home"
+          title="Home"
+        >
+          <span className="text-2xl">🏠</span>
+        </Link>
+        <Link
+          to="/create"
+          className="grid h-12 w-12 place-items-center rounded-full border border-black/10 hover:bg-black/[0.04]"
+          aria-label="Create group"
+          title="Create group"
+        >
+          <span className="text-2xl">➕</span>
+        </Link>
+      </nav>
+    </div>
   );
 }
 
@@ -212,7 +189,8 @@ function GroupRedirect() {
 export default function App() {
   return (
     <AuthProvider>
-      <Header />
+      <HomeButton />
+      <FloatingNav />
       <AppErrorBoundary>
         <Suspense
           fallback={

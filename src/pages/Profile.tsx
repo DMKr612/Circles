@@ -30,6 +30,10 @@ export default function Profile() {
   const [uid, setUid] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [name, setName] = useState<string>("");
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [sTheme, setSTheme] = useState<'system'|'light'|'dark'>('system');
+  const [emailNotifs, setEmailNotifs] = useState<boolean>(false);
+  const [pushNotifs, setPushNotifs] = useState<boolean>(false);
   // Settings modal state
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sName, setSName] = useState<string>("");
@@ -38,6 +42,7 @@ export default function Profile() {
   const [sInterests, setSInterests] = useState<string>("");
   const [settingsMsg, setSettingsMsg] = useState<string | null>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
 
   // Stats
   const [groupsCreated, setGroupsCreated] = useState<number>(0);
@@ -287,7 +292,7 @@ useEffect(() => {
     // load current profile fieldsƒ
     const { data: p, error } = await supabase
       .from("profiles")
-      .select("name, city, timezone, interests")
+      .select("name, city, timezone, interests, avatar_url")
       .eq("user_id", uid)
       .maybeSingle();
     if (error) { setSettingsMsg(error.message); setSettingsOpen(true); return; }
@@ -296,8 +301,18 @@ useEffect(() => {
     setSTimezone((p as any)?.timezone ?? "UTC");
     const ints = Array.isArray((p as any)?.interests) ? ((p as any).interests as string[]) : [];
     setSInterests(ints.join(", "));
+    setAvatarUrl((p as any)?.avatar_url ?? null);
     setSettingsOpen(true);
   }
+
+// Helper to get device/browser timezone
+function deviceTZ(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
 
   async function saveSettings(e?: React.FormEvent) {
     if (e) e.preventDefault();
@@ -319,6 +334,10 @@ useEffect(() => {
       if (error) throw error;
       setName(name);
       setSettingsMsg("Saved.");
+      localStorage.setItem('theme', sTheme);
+      localStorage.setItem('emailNotifs', emailNotifs ? '1' : '0');
+      localStorage.setItem('pushNotifs', pushNotifs ? '1' : '0');
+      applyTheme(sTheme);
       setSettingsOpen(false);
     } catch (err: any) {
       setSettingsMsg(err?.message || "Failed to save");
@@ -327,11 +346,41 @@ useEffect(() => {
     }
   }
 
-  // Logout function
-  async function logout() {
-    try {
-      await supabase.auth.signOut();
-      localStorage.removeItem("onboardingSeen");
+  function applyTheme(theme: 'system'|'light'|'dark') {
+  const root = document.documentElement;
+  root.classList.remove('light','dark');
+  if (theme === 'light') root.classList.add('light');
+  else if (theme === 'dark') root.classList.add('dark');
+}
+
+async function onAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+  const file = e.target.files?.[0];
+  if (!uid || !file) return;
+  try {
+    setAvatarUploading(true);
+    const ext = file.name.split('.').pop() || 'jpg';
+    const path = `${uid}/${Date.now()}.${ext}`;
+    const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, { upsert: true });
+    if (upErr) throw upErr;
+    const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
+    const url = pub?.publicUrl || null;
+    if (url) {
+      await supabase.from('profiles').update({ avatar_url: url }).eq('user_id', uid);
+      setAvatarUrl(url);
+    }
+  } catch (e) {
+    console.error(e);
+    setSettingsMsg('Avatar upload failed');
+  } finally {
+    setAvatarUploading(false);
+  }
+}
+
+// Logout function
+async function logout() {
+  try {
+    await supabase.auth.signOut();
+    localStorage.removeItem("onboardingSeen");
       window.location.href = `${window.location.origin}/onboarding`;
     } catch (error) {
       console.error("Logout failed:", error);
@@ -361,6 +410,12 @@ useEffect(() => {
       const { data: auth } = await supabase.auth.getUser();
       const _uid = auth?.user?.id || null;
       const _email = auth?.user?.email || null;
+      const LS_THEME = localStorage.getItem('theme') as 'system'|'light'|'dark' | null;
+      if (LS_THEME) setSTheme(LS_THEME);
+      const LS_EMAIL = localStorage.getItem('emailNotifs');
+      if (LS_EMAIL) setEmailNotifs(LS_EMAIL === '1');
+      const LS_PUSH = localStorage.getItem('pushNotifs');
+      if (LS_PUSH) setPushNotifs(LS_PUSH === '1');
       if (!_uid) { setLoading(false); setErr("Please sign in."); return; }
       if (off) return;
       setUid(_uid); setEmail(_email);
@@ -369,7 +424,7 @@ useEffect(() => {
       const [profResp, createdCountResp, joinedCountResp] = await Promise.all([
         supabase
           .from("profiles")
-          .select("name, city, timezone, interests")
+          .select("name, city, timezone, interests, avatar_url")
           .eq("user_id", _uid)
           .maybeSingle(),
         supabase
@@ -390,8 +445,10 @@ useEffect(() => {
         setName(prof?.name ?? "");
         setSCity(prof?.city ?? "");
         setSTimezone(prof?.timezone ?? "UTC");
+        if (!prof?.timezone) setSTimezone(deviceTZ());
         const ints0 = Array.isArray(prof?.interests) ? (prof.interests as string[]) : [];
         setSInterests(ints0.join(", "));
+        setAvatarUrl(prof?.avatar_url ?? null);
 
         setGroupsCreated((createdCountResp.count as number | null) ?? 0);
         setGroupsJoined((joinedCountResp.count as number | null) ?? 0);
@@ -545,8 +602,12 @@ useEffect(() => {
         <div className="space-y-6">
       {/* Header */}
       <div className="mb-6 flex items-center gap-4">
-        <div className="grid h-16 w-16 place-content-center rounded-full bg-emerald-100 text-emerald-800 ring-1 ring-emerald-300/60">
-          <span className="text-2xl font-semibold tracking-wide">{initials}</span>
+        <div className="grid h-16 w-16 place-content-center rounded-full bg-emerald-100 text-emerald-800 ring-1 ring-emerald-300/60 overflow-hidden">
+          {avatarUrl ? (
+            <img src={avatarUrl} alt="" className="h-16 w-16 object-cover" />
+          ) : (
+            <span className="text-2xl font-semibold tracking-wide">{initials}</span>
+          )}
         </div>
         <div className="flex-1">
           <div className="text-lg font-semibold text-neutral-900">{name || email}</div>
@@ -951,10 +1012,22 @@ useEffect(() => {
             </div>
 
             <div>
+              <label className="mb-1 block text-sm font-medium text-neutral-800">Avatar</label>
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-full bg-neutral-200 grid place-items-center overflow-hidden">
+                  {avatarUrl ? <img src={avatarUrl} alt="" className="h-10 w-10 object-cover" /> : <span className="text-xs">{initials}</span>}
+                </div>
+                <input type="file" accept="image/*" onChange={onAvatarChange} className="text-sm" />
+                {avatarUploading && <span className="text-xs text-neutral-600">Uploading…</span>}
+              </div>
+            </div>
+
+            <div>
               <label className="mb-1 block text-sm font-medium text-neutral-800">City</label>
               <input
                 value={sCity}
                 onChange={(e) => setSCity(e.target.value)}
+                onBlur={() => { if (!sTimezone || sTimezone === "UTC") setSTimezone(deviceTZ()); }}
                 className="w-full rounded-md border border-black/10 px-3 py-2 text-sm"
                 placeholder="City"
               />
@@ -968,6 +1041,9 @@ useEffect(() => {
                 className="w-full rounded-md border border-black/10 px-3 py-2 text-sm"
                 placeholder="e.g., Europe/Berlin"
               />
+              <div className="mt-1 text-[11px] text-neutral-500">
+                Auto-fills from your device when you set City. You can still override manually.
+              </div>
             </div>
 
             <div>
@@ -982,6 +1058,40 @@ useEffect(() => {
             </div>
           </div>
 
+          <div>
+  <label className="mb-1 block text-sm font-medium text-neutral-800">Theme</label>
+  <select
+    value={sTheme}
+    onChange={(e) => setSTheme(e.target.value as 'system'|'light'|'dark')}
+    className="w-full rounded-md border border-black/10 px-3 py-2 text-sm"
+  >
+    <option value="system">System</option>
+    <option value="light">Light</option>
+    <option value="dark">Dark</option>
+  </select>
+  <div className="mt-1 text-[11px] text-neutral-500">Light/Dark applies after save.</div>
+</div>
+
+<div className="flex items-center gap-2">
+  <input
+    id="emailNotifs"
+    type="checkbox"
+    checked={emailNotifs}
+    onChange={(e) => setEmailNotifs(e.target.checked)}
+    className="h-4 w-4 rounded border-black/20"
+  />
+  <label htmlFor="emailNotifs" className="text-sm text-neutral-800">Email notifications</label>
+</div>
+<div className="flex items-center gap-2">
+  <input
+    id="pushNotifs"
+    type="checkbox"
+    checked={pushNotifs}
+    onChange={(e) => setPushNotifs(e.target.checked)}
+    className="h-4 w-4 rounded border-black/20"
+  />
+  <label htmlFor="pushNotifs" className="text-sm text-neutral-800">Push notifications</label>
+</div>
           {settingsMsg && (
             <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {settingsMsg}
