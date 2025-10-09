@@ -19,7 +19,7 @@ export type Game = {
   image: string;
 };
 
-type GroupRow = { id: string; title: string | null; description?: string | null; city?: string | null; category?: string | null; capacity?: number | null; created_at?: string | null; game?: string | null; };
+type GroupRow = { id: string; title: string | null; description?: string | null; city?: string | null; category?: string | null; capacity?: number | null; created_at?: string | null; game?: string | null; code?: string | null; };
 
 const CATEGORIES = ["All", "Games", "Study", "Outdoors"] as const;
 
@@ -49,6 +49,8 @@ const GAME_MAP: Record<string, Game> = Object.fromEntries(
 
 export default function BrowsePage() {
   const [params, setParams] = useSearchParams();
+  const groupId = params.get("id");
+  const code = params.get("code");
   const [q, setQ] = useState<string>(params.get("q") ?? "");
   const [cat, setCat] = useState<typeof CATEGORIES[number]>(
     (params.get("category") as typeof CATEGORIES[number]) ?? "All"
@@ -56,6 +58,12 @@ export default function BrowsePage() {
 
   const [groups, setGroups] = useState<GroupRow[]>([]);
   const [loading, setLoading] = useState(false);
+  // Memoized detector for code typed into search box
+  const codeFromQ = useMemo(() => {
+    const s = (q || "").trim();
+    // treat 6–12 alphanumeric as a possible group code
+    return /^[A-Za-z0-9]{6,12}$/.test(s) ? s.toUpperCase() : null;
+  }, [q]);
 const PAGE_SIZE = 12;
 const [page, setPage] = useState(0);
 const [hasMore, setHasMore] = useState(false);
@@ -80,17 +88,47 @@ const [err, setErr] = useState<string | null>(null);
     // keep URL in sync with UI selections
     if (cat && cat !== "All") next.set("category", cat); else next.delete("category");
     if (q) next.set("q", q); else next.delete("q");
+    if (groupId) next.set("id", groupId); else next.delete("id");
+    if (code) next.set("code", code); else next.delete("code");
+    if (!code && codeFromQ) next.set("code", codeFromQ); else if (!codeFromQ) next.delete("code");
     // only push an update if something actually changed
     if (next.toString() !== params.toString()) {
       setParams(next, { replace: true });
     }
-  }, [q, cat]);
+  }, [q, cat, groupId, code, codeFromQ]);
 
   useEffect(() => {
     let mounted = true;
 
     async function load(reset: boolean) {
       try {
+        if (code || codeFromQ) {
+          const needle = (code || codeFromQ)!;
+          const { data, error } = await supabase
+            .from("groups")
+            .select("id, title, description, city, category, game, created_at, code")
+            .ilike("code", needle)  // case-insensitive exact
+            .single();
+          if (error) throw error;
+          if (!mounted) return;
+          setGroups(data ? [data as GroupRow] : []);
+          setHasMore(false);
+          setErr(null);
+          return;
+        }
+        if (groupId) {
+          const { data, error } = await supabase
+            .from("groups")
+            .select("id, title, description, city, category, game, created_at, code")
+            .eq("id", groupId)
+            .single();
+          if (error) throw error;
+          if (!mounted) return;
+          setGroups(data ? [data as GroupRow] : []);
+          setHasMore(false);
+          setErr(null);
+          return;
+        }
         if (reset) {
           setLoading(true);
           setGroups([]);
@@ -103,7 +141,7 @@ const [err, setErr] = useState<string | null>(null);
 
         let base = supabase
           .from("groups")
-          .select("id, title, description, city, category, game, created_at")
+          .select("id, title, description, city, category, game, created_at, code")
           .order("created_at", { ascending: false });
 
         if (cat && cat !== "All") {
@@ -143,14 +181,17 @@ const [err, setErr] = useState<string | null>(null);
 
     load(true);
     return () => { mounted = false; };
-  }, [cat, q, allowedByCat]);
+  }, [cat, q, allowedByCat, groupId, code, codeFromQ]);
   async function loadMore() {
     if (paging || loading || !hasMore) return;
+    if (groupId) return;
+    if (code) return;
+    if (codeFromQ) return;
     setPaging(true);
     try {
       let base = supabase
         .from("groups")
-        .select("id, title, description, city, category, game, created_at")
+        .select("id, title, description, city, category, game, created_at, code")
         .order("created_at", { ascending: false });
 
       if (cat && cat !== "All") {
@@ -336,9 +377,17 @@ const [err, setErr] = useState<string | null>(null);
       <div className="mt-10">
         <div className="flex items-baseline justify-between">
           <h2 className="text-xl font-semibold">
-            {cat !== "All" ? `Groups in ${cat}` : q ? `Groups matching “${q}”` : "Latest Groups"}
+            {(code || codeFromQ)
+              ? "Group by Code"
+              : groupId
+                ? "Group by ID"
+                : cat !== "All"
+                  ? `Groups in ${cat}`
+                  : q
+                    ? `Groups matching “${q}”`
+                    : "Latest Groups"}
           </h2>
-          {(cat !== "All" || q) && (
+          {((code || codeFromQ || groupId) ? false : (cat !== "All" || q)) && (
             <button
               onClick={() => { setCat("All"); setQ(""); }}
               className="text-sm text-neutral-600 hover:text-neutral-800"
@@ -373,9 +422,12 @@ const [err, setErr] = useState<string | null>(null);
                           <div className="text-xs text-neutral-400">
                             {g.city && <span>{g.city} · </span>}
                             {g.category && <span>{g.category}</span>}
+                            {g.code && (
+                              <span className="ml-2 rounded-full bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium text-neutral-600">
+                                Code: {String(g.code).toUpperCase()}
+                              </span>
+                            )}
                           </div>
-                          {/* debug id while fixing routes; remove later */}
-                          <div className="text-[10px] text-neutral-400">id:{String(gid).slice(0,8)}</div>
                         </div>
                         <Link
                           to={`/group/${gid}`}

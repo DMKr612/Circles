@@ -94,6 +94,7 @@ function HomeButton() {
 }
 
 function FloatingNav() {
+  const nav = useNavigate();
   const { user } = useAuth();
   const location = useLocation();
   const onOnboarding = location.pathname.startsWith("/onboarding");
@@ -128,6 +129,18 @@ function FloatingNav() {
         >
           <span className="text-2xl">➕</span>
         </Link>
+        <button
+          onClick={() => nav('/profile#chat')}
+          className="relative grid h-12 w-12 place-items-center rounded-full border border-black/10 hover:bg-emerald-100 transition"
+          aria-label="Messages"
+          title="Messages"
+        >
+          <span className="text-2xl text-emerald-600">💬</span>
+          <span className="absolute top-1 right-1 flex h-3 w-3">
+            <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping"></span>
+            <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-600"></span>
+          </span>
+        </button>
       </nav>
     </div>
   );

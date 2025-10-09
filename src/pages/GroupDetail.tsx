@@ -19,6 +19,7 @@ console.log('[SUPABASE]', import.meta.env?.VITE_SUPABASE_URL, String((import.met
   online_link: string | null;
   location: string | null;
   created_at: string;
+  code?: string | null;
 };
 
  type Message = {
@@ -43,6 +44,7 @@ export default function GroupDetail() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
   const [me, setMe] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   // Chat modal state
   const [chatOpen, setChatOpen] = useState(false);
@@ -70,6 +72,16 @@ export default function GroupDetail() {
   const [newTitle, setNewTitle] = useState("Schedule");
   const [newOptions, setNewOptions] = useState(""); // one label per line
 
+  async function copyGroupCode() {
+    if (!group?.code) return;
+    try {
+      await navigator.clipboard.writeText(String(group.code));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      console.warn('Clipboard failed', e);
+    }
+  }
   useEffect(() => {
     let ignore = false;
     (async () => {
@@ -559,6 +571,27 @@ return (
                 </div>
                 <h1 className="truncate text-3xl font-bold tracking-tight text-neutral-900">{group!.title}</h1>
                 <div className="mt-1 text-xs text-neutral-500">Created {new Date(group!.created_at).toLocaleDateString()} • Host: {members.find(m => m.user_id === group!.host_id)?.name || group!.host_id.slice(0,6)}</div>
+                {group!.code && (
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
+                      Code: {String(group!.code).toUpperCase()}
+                    </span>
+                    <button
+                      onClick={copyGroupCode}
+                      className="rounded border border-black/10 bg-white px-2 py-0.5 hover:bg-black/[0.04]"
+                      title="Copy group code"
+                    >
+                      {copied ? 'Copied!' : 'Copy'}
+                    </button>
+                    <Link
+                      to={`/browse?code=${group!.code}`}
+                      className="text-emerald-700 hover:underline"
+                      title="Open this group in Browse by code"
+                    >
+                      Open in Browse
+                    </Link>
+                  </div>
+                )}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 {!isMember && (

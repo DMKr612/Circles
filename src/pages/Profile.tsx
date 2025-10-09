@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import { supabase } from "../lib/supabase";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 
 
 // Types
@@ -24,8 +25,28 @@ function timeAgo(iso: string) {
   const h = Math.floor(m / 60); if (h < 24) return `${h}h`;
   const days = Math.floor(h / 24); return `${days}d`;
 }
+type GroupInvite = {
+  group_id: string;
+  group_title: string | null;
+  role: string | null;
+  status: string;
+  invited_at: string;
+};
+type GroupMsgNotif = {
+  group_id: string;
+  group_title: string | null;
+  preview: string;
+  created_at: string;
+};
 
 export default function Profile() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  useEffect(() => {
+    if (location.hash === "#chat") {
+      setSidebarOpen(true);
+    }
+  }, [location.hash]);
   // Auth + profile
   const [uid, setUid] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
@@ -57,8 +78,9 @@ export default function Profile() {
   const [gamesModalOpen, setGamesModalOpen] = useState(false);
   // Previews
   const [createdPreview, setCreatedPreview] = useState<PreviewGroup[]>([]);
-
-
+// Group invitations + group message notifications
+const [groupInvites, setGroupInvites] = useState<GroupInvite[]>([]);
+const [groupNotifs, setGroupNotifs] = useState<GroupMsgNotif[]>([]);
   const visibleGroups = useMemo(() => {
     if (groupFilter === 'created') return createdPreview;
     if (groupFilter === 'joined') return joinedPreview;
@@ -97,6 +119,17 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
 const sidebarRef = useRef<HTMLDivElement | null>(null);
 const [notifOpen, setNotifOpen] = useState(false);
 const notifRef = useRef<HTMLDivElement | null>(null);
+
+  // Hover-intent for chat sidebar
+  const hoverTimer = useRef<number | null>(null);
+  function handleSidebarEnter() {
+    if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
+    setSidebarOpen(true);
+  }
+  function handleSidebarLeave() {
+    if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
+    hoverTimer.current = window.setTimeout(() => setSidebarOpen(false), 400);
+  }
 
   // Friends + requests
   type FriendShipRow = {
@@ -140,6 +173,12 @@ const notifRef = useRef<HTMLDivElement | null>(null);
     return out;
   }, [threads, friends, friendProfiles, uid]);
 
+  // Derived: unread threads and total notification count
+  const unreadThreads = useMemo(() => threads.filter(t => !t.last_from_me), [threads]);
+  const notifCount = useMemo(
+  () => incomingRequests.length + groupInvites.length + groupNotifs.length,
+  [incomingRequests.length, groupInvites.length, groupNotifs.length]
+);
   // Build friend options (accepted friends) for autocomplete
   const friendOptions = useMemo(() => {
     if (!uid) return [] as Array<{ id: string; name: string; avatar_url: string | null }>;
@@ -193,6 +232,8 @@ useEffect(() => {
     setDmLoading(true);
     setDmMsgs([]);
     setDmTargetId(otherId);
+    // mark thread as read locally
+    setThreads(prev => prev.map(t => t.other_id === otherId ? { ...t, unread: false, last_from_me: true } : t));
     const { data: msgs } = await supabase
       .from("direct_messages")
       .select("id,from_id,to_id,body,created_at")
@@ -226,6 +267,51 @@ useEffect(() => {
       .eq("status", "pending");
     setOutgoingRequests((outgoing ?? []) as any);
   }
+
+  async function refreshGroupSignals(userId: string) {
+  // Invitations: status pending/invited for this user
+  const { data: inv } = await supabase
+    .from("group_members")
+    .select("group_id, role, status, created_at, groups(title)")
+    .eq("user_id", userId)
+    .in("status", ["pending", "invited"])
+    .order("created_at", { ascending: false })
+    .limit(50);
+  const invites: GroupInvite[] = (inv ?? []).map((r: any) => ({
+    group_id: r.group_id,
+    group_title: r.groups?.title ?? null,
+    role: r.role ?? null,
+    status: r.status ?? "pending",
+    invited_at: r.created_at,
+  }));
+  setGroupInvites(invites);
+
+  // Group message notifications: latest posts in my groups, not from me
+  const { data: myGroups } = await supabase
+    .from("group_members")
+    .select("group_id")
+    .eq("user_id", userId)
+    .eq("status", "active");
+  const gIds = Array.from(new Set((myGroups ?? []).map((r: any) => r.group_id)));
+
+  let notifs: GroupMsgNotif[] = [];
+  if (gIds.length) {
+    const { data: msgs } = await supabase
+      .from("group_messages")
+      .select("group_id, content, created_at, groups(title), user_id")
+      .in("group_id", gIds)
+      .neq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(20);
+    notifs = (msgs ?? []).map((m: any) => ({
+      group_id: m.group_id,
+      group_title: m.groups?.title ?? null,
+      preview: String(m.content || "").slice(0, 120),
+      created_at: m.created_at,
+    }));
+  }
+  setGroupNotifs(notifs);
+}
 
   async function openProfileView(otherId: string) {
     if (!uid) return;
@@ -275,6 +361,32 @@ useEffect(() => {
     if (uid) await refreshFriendData(uid);
     if (viewUserId === otherId) setViewFriendStatus('none');
   }
+  async function acceptGroupInvite(gid: string) {
+  if (!uid) return;
+  // Prefer simple update; if RLS blocks, fallback to delete+insert
+  const { error } = await supabase
+    .from("group_members")
+    .update({ status: "active" })
+    .eq("group_id", gid)
+    .eq("user_id", uid);
+  if (error) {
+    try {
+      await supabase.from("group_members").delete().eq("group_id", gid).eq("user_id", uid);
+      await supabase.from("group_members").insert({ group_id: gid, user_id: uid, status: "active", role: "member" });
+    } catch {}
+  }
+  await refreshGroupSignals(uid);
+}
+async function declineGroupInvite(gid: string) {
+  if (!uid) return;
+  await supabase.from("group_members").delete().eq("group_id", gid).eq("user_id", uid);
+  await refreshGroupSignals(uid);
+}
+function openGroup(gid: string) {
+  setGroupNotifs(prev => prev.filter(n => n.group_id !== gid));
+  setNotifOpen(false);
+  navigate(`/group/${gid}`);
+}
 
   // Resolve display for current DM target
   const dmDisplay = useMemo(() => {
@@ -571,6 +683,7 @@ useEffect(() => {
         if (!off) setThreads(threadList);
 
         if (!off) await refreshFriendData(_uid);
+        if (!off) await refreshGroupSignals(_uid);
       })();
     })();
     return () => { off = true; };
@@ -613,69 +726,79 @@ useEffect(() => {
           <div className="text-lg font-semibold text-neutral-900">{name || email}</div>
           <div className="text-sm text-neutral-600">{email}</div>
                     <div className="mt-2 flex items-center gap-2">
-            <Link to="/browse?created=1" className="rounded-md border border-black/10 bg-white px-3 py-1.5 text-sm hover:bg-black/[0.04]">Created</Link>
+            {/* Removed "Created" link */}
             <div ref={notifRef} className="relative">
-  <button
-    onClick={() => setNotifOpen(v => !v)}
-    className="ml-2 inline-flex items-center gap-2 rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm hover:bg-black/[0.04]"
-  >
-    <span>Notifications</span>
-    <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-white text-xs">{incomingRequests.length}</span>
-  </button>
-  {notifOpen && (
-    <div className="absolute right-0 z-50 mt-1 w-80 rounded-md border border-black/10 bg-white p-2 shadow-xl">
-      <div className="mb-1 text-xs font-medium text-neutral-700">Recent activity</div>
-      <ul className="max-h-64 overflow-y-auto divide-y">
-        {/* Friend requests */}
-        {incomingRequests.length > 0 && (
-          <li className="py-2">
-            <div className="mb-1 text-sm font-medium text-neutral-900">Friend requests</div>
-            <ul className="space-y-1">
-              {incomingRequests.slice(0, 5).map(r => {
-                const other = r.user_id_a === uid ? r.user_id_b : r.user_id_a;
-                const nm = friendProfiles.get(other)?.name || other.slice(0,6);
-                return (
-                  <li key={r.id} className="flex items-center justify-between">
-                    <span className="text-sm text-neutral-800">{nm}</span>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => acceptFriend(other)} className="rounded border border-black/10 px-2 py-0.5 text-xs">Accept</button>
-                      <button onClick={() => removeFriend(other)} className="rounded border border-black/10 px-2 py-0.5 text-xs">Decline</button>
+              <button
+                onClick={() => setNotifOpen(v => !v)}
+                className="ml-2 inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1.5 text-sm hover:bg-black/[0.04]"
+                title="Notifications"
+                aria-label="Notifications"
+              >
+                <span className="text-base">🔔</span>
+                {notifCount > 0 && (
+                  <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-white text-xs leading-none">{notifCount}</span>
+                )}
+              </button>
+              {notifOpen && (
+                <div className="absolute right-0 z-50 mt-1 w-96 max-w-[92vw] overflow-hidden rounded-xl border border-black/10 bg-white shadow-xl">
+                  <div className="flex items-center justify-between border-b border-black/10 bg-neutral-50 px-3 py-2">
+                    <div className="text-sm font-medium text-neutral-800">Notifications</div>
+                    <span className="rounded-full bg-neutral-200 px-2 py-0.5 text-[11px] text-neutral-800">{notifCount}</span>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto p-2">
+                    {/* Friend requests */}
+                    <div className="mb-2">
+                      <div className="mb-1 text-xs font-semibold text-neutral-700">Friend requests</div>
+                      {incomingRequests.length === 0 ? (
+                        <div className="rounded-md border border-black/5 bg-neutral-50 px-2 py-2 text-xs text-neutral-600">No new requests</div>
+                      ) : (
+                        <ul className="space-y-1">
+                          {incomingRequests.slice(0, 5).map(r => {
+                            const other = r.user_id_a === uid ? r.user_id_b : r.user_id_a;
+                            const nm = friendProfiles.get(other)?.name || other.slice(0,6);
+                            return (
+                              <li key={r.id} className="flex items-center justify-between rounded-md border border-black/10 px-2 py-1.5">
+                                <span className="truncate text-sm text-neutral-800">{nm}</span>
+                                <div className="flex items-center gap-2">
+                                  <button onClick={() => acceptFriend(other)} className="rounded-md bg-emerald-600 px-2 py-0.5 text-xs text-white">Accept</button>
+                                  <button onClick={() => removeFriend(other)} className="rounded-md border border-black/10 px-2 py-0.5 text-xs">Decline</button>
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
                     </div>
-                  </li>
-                );
-              })}
-            </ul>
-          </li>
-        )}
-        {/* Recent messages (received) */}
-        {threads.filter(t => !t.last_from_me).slice(0,5).map(t => (
-          <li key={t.other_id} className="flex items-center justify-between py-2">
-            <div className="min-w-0 pr-2">
-              <div className="truncate text-sm font-medium text-neutral-900">{t.name}</div>
-              <div className="truncate text-xs text-neutral-600">{t.last_body}</div>
-            </div>
-            <button onClick={() => openThread(t.other_id)} className="shrink-0 rounded-md border border-black/10 px-2 py-0.5 text-xs">Open</button>
-          </li>
-        ))}
-        {incomingRequests.length === 0 && threads.filter(t => !t.last_from_me).length === 0 && (
-          <li className="py-2 text-xs text-neutral-600">Nothing new</li>
-        )}
-      </ul>
-    </div>
+                    {/* Group messages */}
+<div className="mb-2">
+  <div className="mb-1 text-xs font-semibold text-neutral-700">Group messages</div>
+  {groupNotifs.length === 0 ? (
+    <div className="rounded-md border border-black/5 bg-neutral-50 px-2 py-2 text-xs text-neutral-600">No new messages</div>
+  ) : (
+    <ul className="divide-y">
+      {groupNotifs.slice(0, 5).map(gn => (
+        <li key={`${gn.group_id}-${gn.created_at}`} className="flex items-center justify-between py-2">
+          <div className="min-w-0 pr-2">
+            <div className="truncate text-sm font-medium text-neutral-900">{gn.group_title || gn.group_id.slice(0,6)}</div>
+            <div className="truncate text-xs text-neutral-600">{gn.preview}</div>
+          </div>
+          <button onClick={() => openGroup(gn.group_id)} className="shrink-0 rounded-md border border-black/10 px-2 py-0.5 text-xs">Open</button>
+        </li>
+      ))}
+    </ul>
   )}
 </div>
+                  </div>
+                </div>
+              )}
+            </div>
             <button
               onClick={openSettings}
               className="ml-2 rounded-md border border-black/10 bg-white px-3 py-1.5 text-sm hover:bg-black/[0.04]"
             >
               Settings
             </button>
-            <Link
-              to="/create"
-              className="ml-2 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
-            >
-              Create Groups
-            </Link>
+            {/* Removed "Create Groups" button */}
           </div>
         </div>
       </div>
@@ -785,10 +908,34 @@ useEffect(() => {
             ))}
           </Card>
         </div>
-      </section>
+        </section>
+        {/* Group Invitations section */}
+        {groupInvites.length > 0 && (
+          <section className="mt-6">
+            <Card title="Group Invitations" count={groupInvites.length} empty="No invitations">
+              {groupInvites.map((gi) => (
+                <li key={gi.group_id} className="flex items-center justify-between py-2">
+                  <div>
+                    <div className="font-medium text-neutral-900">{gi.group_title || gi.group_id.slice(0,6)}</div>
+                    <div className="text-xs text-neutral-600">Role: {gi.role || "member"} · Status: {gi.status}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => acceptGroupInvite(gi.group_id)} className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs text-white">Accept</button>
+                    <button onClick={() => declineGroupInvite(gi.group_id)} className="rounded-md border border-black/10 bg-white px-3 py-1.5 text-xs">Decline</button>
+                  </div>
+                </li>
+              ))}
+            </Card>
+          </section>
+        )}
         </div>
         {sidebarOpen && (
-          <aside ref={sidebarRef} className="rounded-2xl border border-black/10 bg-white p-4 shadow-sm h-max sticky top-4">
+          <aside
+            ref={sidebarRef}
+            onMouseEnter={handleSidebarEnter}
+            onMouseLeave={handleSidebarLeave}
+            className="rounded-2xl border border-black/10 bg-white p-4 shadow-sm h-max sticky top-4 transition-all duration-300"
+          >
           {/* If no active chat: show search + conversations list */}
           {!dmTargetId && (
             <>
@@ -927,10 +1074,23 @@ useEffect(() => {
         )}
         {!sidebarOpen && (
           <button
-            onClick={() => setSidebarOpen(true)}
-            className="fixed bottom-4 right-4 z-40 rounded-full border border-black/10 bg-white px-4 py-2 text-sm shadow hover:bg-black/[0.04]"
+            onClick={() => {
+              if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
+              setSidebarOpen(true);
+            }}
+            onMouseEnter={handleSidebarEnter}
+            className="fixed bottom-4 right-4 z-40 h-12 w-12 rounded-full bg-emerald-600 text-white shadow-lg flex items-center justify-center hover:bg-emerald-700 transition relative"
+            title="Open chat"
+            aria-label="Open chat"
           >
-            Open Chat
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-6 w-6">
+              <path d="M3.25 6.75A2.75 2.75 0 0 1 6 4h12a2.75 2.75 0 0 1 2.75 2.75v6.5A2.75 2.75 0 0 1 18 16H9.414a1.75 1.75 0 0 0-1.238.512l-2.476 2.476A.75.75 0 0 1 4 18.75V6.75z" />
+            </svg>
+            {unreadThreads.length > 0 && (
+              <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-400 text-[10px] font-medium text-white animate-pulse">
+                {unreadThreads.length}
+              </span>
+            )}
           </button>
         )}
       </div>
@@ -1225,11 +1385,11 @@ function Row({ id, title, meta }: { id: string; title: string; meta: string }) {
   return (
     <li className="flex items-center justify-between py-2">
       <div>
-        <Link to={`/group/${id}`} className="font-medium text-neutral-900 hover:underline">{title}</Link>
+        <Link to={`/browse?id=${id}`} className="font-medium text-neutral-900 hover:underline">{title}</Link>
         <div className="text-xs text-neutral-600">{meta}</div>
         <div className="text-[10px] text-neutral-400">id:{String(id).slice(0,8)}</div>
       </div>
-      <Link to={`/group/${id}`} className="text-sm text-emerald-700 hover:underline">Open</Link>
+      <Link to={`/browse?id=${id}`} className="text-sm text-emerald-700 hover:underline">Open</Link>
     </li>
   );
 }
