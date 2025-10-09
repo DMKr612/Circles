@@ -3,5 +3,5 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  base: '/'              // << required for subpath hosting
+  base: '/Circles/'              // << required for subpath hosting
 })
