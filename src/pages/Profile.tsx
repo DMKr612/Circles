@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import { Link, useNavigate } from "react-router-dom";
 import { useLocation } from "react-router-dom";
@@ -42,11 +42,16 @@ type GroupMsgNotif = {
 export default function Profile() {
   const navigate = useNavigate();
   const location = useLocation();
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (location.hash === "#chat") {
       setSidebarOpen(true);
     }
-  }, [location.hash]);
+  }, [location.key, location.hash]);
+  useEffect(() => {
+    const handler = () => setSidebarOpen(true);
+    window.addEventListener('open-chat' as any, handler);
+    return () => window.removeEventListener('open-chat' as any, handler);
+  }, []);
   // Auth + profile
   const [uid, setUid] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
@@ -120,16 +125,6 @@ const sidebarRef = useRef<HTMLDivElement | null>(null);
 const [notifOpen, setNotifOpen] = useState(false);
 const notifRef = useRef<HTMLDivElement | null>(null);
 
-  // Hover-intent for chat sidebar
-  const hoverTimer = useRef<number | null>(null);
-  function handleSidebarEnter() {
-    if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
-    setSidebarOpen(true);
-  }
-  function handleSidebarLeave() {
-    if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
-    hoverTimer.current = window.setTimeout(() => setSidebarOpen(false), 400);
-  }
 
   // Friends + requests
   type FriendShipRow = {
@@ -932,8 +927,6 @@ useEffect(() => {
         {sidebarOpen && (
           <aside
             ref={sidebarRef}
-            onMouseEnter={handleSidebarEnter}
-            onMouseLeave={handleSidebarLeave}
             className="rounded-2xl border border-black/10 bg-white p-4 shadow-sm h-max sticky top-4 transition-all duration-300"
           >
           {/* If no active chat: show search + conversations list */}
@@ -1075,10 +1068,8 @@ useEffect(() => {
         {!sidebarOpen && (
           <button
             onClick={() => {
-              if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
               setSidebarOpen(true);
             }}
-            onMouseEnter={handleSidebarEnter}
             className="fixed bottom-4 right-4 z-40 h-12 w-12 rounded-full bg-emerald-600 text-white shadow-lg flex items-center justify-center hover:bg-emerald-700 transition relative"
             title="Open chat"
             aria-label="Open chat"
@@ -1382,14 +1373,15 @@ function Card({ title, count, empty, children }: { title: string; count: number;
 }
 
 function Row({ id, title, meta }: { id: string; title: string; meta: string }) {
+  const shortHash = String(id).slice(0, 8).toUpperCase();
   return (
     <li className="flex items-center justify-between py-2">
       <div>
-        <Link to={`/browse?id=${id}`} className="font-medium text-neutral-900 hover:underline">{title}</Link>
+        <Link to={`/group/${id}`} className="font-medium text-neutral-900 hover:underline">{title}</Link>
         <div className="text-xs text-neutral-600">{meta}</div>
-        <div className="text-[10px] text-neutral-400">id:{String(id).slice(0,8)}</div>
+        <div className="text-[11px] text-neutral-500 tracking-wider">Code: {shortHash}</div>
       </div>
-      <Link to={`/browse?id=${id}`} className="text-sm text-emerald-700 hover:underline">Open</Link>
+      <Link to={`/group/${id}`} className="text-sm text-emerald-700 hover:underline">Open</Link>
     </li>
   );
 }
