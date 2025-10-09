@@ -13,27 +13,27 @@ const SLIDES: Slide[] = [
   {
     title: "Welcome to Circles",
     text: "Create and join micro-groups for games, study, and local meetups.",
-    image: "../image2.png",
+    image: `${import.meta.env.BASE_URL}image2.png`,
   },
   {
     title: "Find Your People",
     text: "Match by interests. See active circles. Join in two taps.",
-    image: "../image3.png",
+    image: `${import.meta.env.BASE_URL}image3.png`,
   },
   {
     title: "Chat & Organize",
     text: "Lightweight DMs, clean group chats, quick polls and events.",
-    image: "../image.png",
+    image: `${import.meta.env.BASE_URL}image.png`,
   },
   {
     title: "Privacy First",
     text: "You choose what to share. RLS-secured backend powered by Supabase.",
-    image: "../image4.png",
+    image: `${import.meta.env.BASE_URL}image4.png`,
   },
   {
     title: "Join Circles Now",
     text: "Sign in to start connecting with others!",
-    image: "../image5.png",
+    image: `${import.meta.env.BASE_URL}image5.png`,
   },
 ];
 
