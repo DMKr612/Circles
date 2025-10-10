@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
 import { supabase } from "../lib/supabase";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useLocation } from "react-router-dom";
 
 
@@ -42,6 +42,7 @@ type GroupMsgNotif = {
 export default function Profile() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { userId: routeUserId } = useParams<{ userId?: string }>();
   useLayoutEffect(() => {
     if (location.hash === "#chat") {
       setSidebarOpen(true);
@@ -54,12 +55,17 @@ export default function Profile() {
   }, []);
   // Auth + profile
   const [uid, setUid] = useState<string | null>(null);
+  const viewingOther = !!routeUserId && routeUserId !== uid;
   const [email, setEmail] = useState<string | null>(null);
   const [name, setName] = useState<string>("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [sTheme, setSTheme] = useState<'system'|'light'|'dark'>('system');
   const [emailNotifs, setEmailNotifs] = useState<boolean>(false);
   const [pushNotifs, setPushNotifs] = useState<boolean>(false);
+  const [allowRatings, setAllowRatings] = useState<boolean>(true);
+  const [ratingAvg, setRatingAvg] = useState<number>(0);
+  const [ratingCount, setRatingCount] = useState<number>(0);
+  
   // Settings modal state
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sName, setSName] = useState<string>("");
@@ -120,7 +126,7 @@ const [groupNotifs, setGroupNotifs] = useState<GroupMsgNotif[]>([]);
   const [threadQuery, setThreadQuery] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   // Sidebar open/close + notifications popover
-const [sidebarOpen, setSidebarOpen] = useState(true);
+const [sidebarOpen, setSidebarOpen] = useState(false);
 const sidebarRef = useRef<HTMLDivElement | null>(null);
 const [notifOpen, setNotifOpen] = useState(false);
 const notifRef = useRef<HTMLDivElement | null>(null);
@@ -171,9 +177,9 @@ const notifRef = useRef<HTMLDivElement | null>(null);
   // Derived: unread threads and total notification count
   const unreadThreads = useMemo(() => threads.filter(t => !t.last_from_me), [threads]);
   const notifCount = useMemo(
-  () => incomingRequests.length + groupInvites.length + groupNotifs.length,
-  [incomingRequests.length, groupInvites.length, groupNotifs.length]
-);
+    () => incomingRequests.length + groupInvites.length + groupNotifs.length,
+    [incomingRequests, groupInvites, groupNotifs]
+  );
   // Build friend options (accepted friends) for autocomplete
   const friendOptions = useMemo(() => {
     if (!uid) return [] as Array<{ id: string; name: string; avatar_url: string | null }>;
@@ -190,10 +196,53 @@ const notifRef = useRef<HTMLDivElement | null>(null);
   const [viewUserId, setViewUserId] = useState<string | null>(null);
   const [viewName, setViewName] = useState<string>("");
   const [viewAvatar, setViewAvatar] = useState<string | null>(null);
- const [viewFriendStatus, setViewFriendStatus] =
-   useState<'none'|'pending_in'|'pending_out'|'accepted'|'blocked'>('none');
+  const [viewAllowRatings, setViewAllowRatings] = useState<boolean>(true);
+  const [viewRatingAvg, setViewRatingAvg] = useState<number>(0);
+  const [viewRatingCount, setViewRatingCount] = useState<number>(0);
+  const [myRating, setMyRating] = useState<number>(0);
+  const [rateBusy, setRateBusy] = useState(false);
+  const [hoverRating, setHoverRating] = useState<number | null>(null);
+  const [myLastRatedAt, setMyLastRatedAt] = useState<string | null>(null);
+  const [viewFriendStatus, setViewFriendStatus] =
+    useState<'none'|'pending_in'|'pending_out'|'accepted'|'blocked'>('none');
+const headerName        = viewingOther ? (viewName || (routeUserId ? routeUserId.slice(0,6) : '')) : (name || email || '');
+const headerAvatar      = viewingOther ? viewAvatar : avatarUrl;
+const headerRatingAvg   = viewingOther ? viewRatingAvg : ratingAvg;
+const headerRatingCount = viewingOther ? viewRatingCount : ratingCount;
 
 
+function fmtCooldown(secs: number): string {
+  const d = Math.floor(secs / 86400);
+  const h = Math.floor((secs % 86400) / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+const cooldownSecs = useMemo(() => {
+  if (!myLastRatedAt) return 0;
+  const last = new Date(myLastRatedAt).getTime();
+  const since = Math.floor((Date.now() - last) / 1000);
+  const limit = 7 * 24 * 3600;
+  return Math.max(0, limit - since);
+}, [myLastRatedAt]);
+
+const canRate = useMemo(
+  () => viewAllowRatings && !rateBusy && cooldownSecs === 0,
+  [viewAllowRatings, rateBusy, cooldownSecs]
+);
+const headerInitials = (
+  viewingOther
+    ? (viewName || routeUserId || '?')
+    : (name || email || '?')
+)?.slice(0, 2).toUpperCase() ?? '?';
+
+useEffect(() => {
+  if (routeUserId && uid && routeUserId !== uid) {
+    loadOtherProfile(routeUserId); // hydrate inline without modal
+  }
+}, [routeUserId, uid]);
   useEffect(() => {
     dmEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [dmMsgs.length]);
@@ -272,6 +321,7 @@ useEffect(() => {
     .in("status", ["pending", "invited"])
     .order("created_at", { ascending: false })
     .limit(50);
+
   const invites: GroupInvite[] = (inv ?? []).map((r: any) => ({
     group_id: r.group_id,
     group_title: r.groups?.title ?? null,
@@ -281,23 +331,25 @@ useEffect(() => {
   }));
   setGroupInvites(invites);
 
-  // Group message notifications: latest posts in my groups, not from me
-  const { data: myGroups } = await supabase
+  // Get all group IDs where the user is an active member
+  const { data: gm } = await supabase
     .from("group_members")
     .select("group_id")
     .eq("user_id", userId)
     .eq("status", "active");
-  const gIds = Array.from(new Set((myGroups ?? []).map((r: any) => r.group_id)));
+  const gIds = (gm ?? []).map((r: any) => r.group_id);
 
+  // Group message notifications: latest posts in my groups, not from me
   let notifs: GroupMsgNotif[] = [];
   if (gIds.length) {
     const { data: msgs } = await supabase
       .from("group_messages")
-      .select("group_id, content, created_at, groups(title), user_id")
+      .select("group_id, content:body, created_at, groups(title), user_id")
       .in("group_id", gIds)
       .neq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(20);
+
     notifs = (msgs ?? []).map((m: any) => ({
       group_id: m.group_id,
       group_title: m.groups?.title ?? null,
@@ -314,11 +366,26 @@ useEffect(() => {
 
     const { data: prof } = await supabase
       .from("profiles")
-      .select("user_id,name,avatar_url")
+      .select("user_id,name,avatar_url,allow_ratings,rating_avg,rating_count")
       .eq("user_id", otherId)
       .maybeSingle();
     setViewName((prof as any)?.name ?? otherId.slice(0,6));
     setViewAvatar((prof as any)?.avatar_url ?? null);
+    setViewAllowRatings(Boolean((prof as any)?.allow_ratings ?? true));
+    setViewRatingAvg(Number((prof as any)?.rating_avg ?? 0));
+    setViewRatingCount(Number((prof as any)?.rating_count ?? 0));
+
+    // Prefill my existing rating for this user
+    try {
+      const { data: myr } = await supabase
+  .from('ratings')
+  .select('stars,updated_at')
+  .eq('rater_id', uid!)
+  .eq('ratee_id', otherId)
+  .maybeSingle();
+setMyRating(Number((myr as any)?.stars ?? 0));
+setMyLastRatedAt((myr as any)?.updated_at ?? null);
+    } catch {}
 
     const { data: rel } = await supabase
       .from("friendships")
@@ -356,6 +423,52 @@ useEffect(() => {
     if (uid) await refreshFriendData(uid);
     if (viewUserId === otherId) setViewFriendStatus('none');
   }
+
+// Rate another user (0–6 stars) with 7-day cooldown
+async function rateUser(n: number) {
+  if (!uid || !viewUserId || rateBusy) return;
+  if (cooldownSecs > 0) return;
+
+  const v = Math.max(0, Math.min(6, Math.round(n)));
+  setRateBusy(true);
+
+  const prev = myRating;
+  setMyRating(v);
+  try {
+    if (v === 0) {
+      await supabase.from('ratings')
+        .delete()
+        .eq('rater_id', uid)
+        .eq('ratee_id', viewUserId);
+      setMyLastRatedAt(null);
+    } else {
+      const { error } = await supabase.from('ratings')
+        .upsert({ rater_id: uid, ratee_id: viewUserId, stars: v }, { onConflict: 'rater_id,ratee_id' });
+      if (error) throw error;
+      setMyLastRatedAt(new Date().toISOString());
+    }
+
+    const { data: agg } = await supabase
+      .from('profiles')
+      .select('rating_avg,rating_count')
+      .eq('user_id', viewUserId)
+      .maybeSingle();
+    if (agg) {
+      setViewRatingAvg(Number((agg as any).rating_avg ?? 0));
+      setViewRatingCount(Number((agg as any).rating_count ?? 0));
+    }
+  } catch (e: any) {
+    setMyRating(prev);
+    const msg = String(e?.message || '');
+    if (/(7\\s*days|week|rate_weekly_limit)/i.test(msg)) {
+      setErr('You can rate this user once every 7 days.');
+    } else {
+      setErr(msg || 'Rating failed.');
+    }
+  } finally {
+    setRateBusy(false);
+  }
+}
   async function acceptGroupInvite(gid: string) {
   if (!uid) return;
   // Prefer simple update; if RLS blocks, fallback to delete+insert
@@ -371,6 +484,56 @@ useEffect(() => {
     } catch {}
   }
   await refreshGroupSignals(uid);
+}
+
+// Hydrate another user's profile WITHOUT opening the modal
+async function loadOtherProfile(otherId: string) {
+  if (!uid) return;
+  setViewUserId(otherId);
+
+  const { data: prof } = await supabase
+    .from("profiles")
+    .select("user_id,name,avatar_url,allow_ratings,rating_avg,rating_count")
+    .eq("user_id", otherId)
+    .maybeSingle();
+  setViewName((prof as any)?.name ?? otherId.slice(0, 6));
+  setViewAvatar((prof as any)?.avatar_url ?? null);
+  setViewAllowRatings(Boolean((prof as any)?.allow_ratings ?? true));
+  setViewRatingAvg(Number((prof as any)?.rating_avg ?? 0));
+  setViewRatingCount(Number((prof as any)?.rating_count ?? 0));
+
+  // Prefill my existing rating for this user
+  try {
+    const { data: myr } = await supabase
+  .from('ratings')
+  .select('stars,updated_at')
+  .eq('rater_id', uid!)
+  .eq('ratee_id', otherId)
+  .maybeSingle();
+setMyRating(Number((myr as any)?.stars ?? 0));
+setMyLastRatedAt((myr as any)?.updated_at ?? null);
+  } catch {}
+
+  // Friend relation (for inline status/buttons)
+  const { data: rel } = await supabase
+    .from("friendships")
+    .select("id,user_id_a,user_id_b,status,requested_by")
+    .or(`and(user_id_a.eq.${uid},user_id_b.eq.${otherId}),and(user_id_a.eq.${otherId},user_id_b.eq.${uid})`)
+    .limit(1)
+    .maybeSingle();
+
+  let st: "none" | "pending_in" | "pending_out" | "accepted" | "blocked" = "none";
+  if (rel) {
+    if (rel.status === "accepted") st = "accepted";
+    else if (rel.status === "blocked") st = "blocked";
+    else if (rel.status === "pending") {
+      st = rel.requested_by === uid ? "pending_out" : "pending_in";
+    }
+  }
+  setViewFriendStatus(st);
+
+  // Make sure the popup never appears
+  setViewOpen(false);
 }
 async function declineGroupInvite(gid: string) {
   if (!uid) return;
@@ -399,7 +562,7 @@ function openGroup(gid: string) {
     // load current profile fieldsƒ
     const { data: p, error } = await supabase
       .from("profiles")
-      .select("name, city, timezone, interests, avatar_url")
+      .select("name, city, timezone, interests, avatar_url, allow_ratings, rating_avg, rating_count")
       .eq("user_id", uid)
       .maybeSingle();
     if (error) { setSettingsMsg(error.message); setSettingsOpen(true); return; }
@@ -409,6 +572,9 @@ function openGroup(gid: string) {
     const ints = Array.isArray((p as any)?.interests) ? ((p as any).interests as string[]) : [];
     setSInterests(ints.join(", "));
     setAvatarUrl((p as any)?.avatar_url ?? null);
+    setAllowRatings((p as any)?.allow_ratings ?? true);
+    setRatingAvg(Number((p as any)?.rating_avg ?? 0));
+    setRatingCount(Number((p as any)?.rating_count ?? 0));
     setSettingsOpen(true);
   }
 
@@ -460,6 +626,14 @@ function deviceTZ(): string {
   else if (theme === 'dark') root.classList.add('dark');
 }
 
+async function saveAllowRatings(next: boolean) {
+  setAllowRatings(next);
+  if (!uid) return;
+  try {
+    await supabase.from('profiles').update({ allow_ratings: next }).eq('user_id', uid);
+  } catch {}
+}
+
 async function onAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
   const file = e.target.files?.[0];
   if (!uid || !file) return;
@@ -498,13 +672,19 @@ async function logout() {
 useEffect(() => {
   (async () => {
     if (!uid) { setFriendProfiles(new Map()); return; }
-    const { data, error } = await supabase.rpc('get_my_friend_profiles');
-    if (error) { setFriendProfiles(new Map()); return; }
-    const m = new Map<string, { name: string; avatar_url: string | null }>();
-    (data ?? []).forEach((p: any) => {
-      m.set(p.user_id, { name: p.name ?? '', avatar_url: p.avatar_url ?? null });
-    });
-    setFriendProfiles(m);
+    const { data: fr } = await supabase
+  .from("friendships")
+  .select("user_id_a,user_id_b,status")
+  .or(`user_id_a.eq.${uid},user_id_b.eq.${uid}`)
+  .eq("status","accepted");
+const ids = new Set<string>();
+(fr ?? []).forEach(r => ids.add(r.user_id_a === uid ? r.user_id_b : r.user_id_a));
+let m = new Map<string, { name: string; avatar_url: string | null }>();
+if (ids.size) {
+  const { data: profs } = await supabase.from("profiles").select("user_id,name,avatar_url").in("user_id", [...ids]);
+  (profs ?? []).forEach((p:any) => m.set(p.user_id, { name: p.name ?? "", avatar_url: p.avatar_url ?? null }));
+}
+setFriendProfiles(m);
   })();
 }, [uid, friends.length]);
 
@@ -531,7 +711,7 @@ useEffect(() => {
       const [profResp, createdCountResp, joinedCountResp] = await Promise.all([
         supabase
           .from("profiles")
-          .select("name, city, timezone, interests, avatar_url")
+          .select("name, city, timezone, interests, avatar_url, allow_ratings, rating_avg, rating_count")
           .eq("user_id", _uid)
           .maybeSingle(),
         supabase
@@ -556,6 +736,9 @@ useEffect(() => {
         const ints0 = Array.isArray(prof?.interests) ? (prof.interests as string[]) : [];
         setSInterests(ints0.join(", "));
         setAvatarUrl(prof?.avatar_url ?? null);
+        setAllowRatings(prof?.allow_ratings ?? true);
+        setRatingAvg(Number(prof?.rating_avg ?? 0));
+        setRatingCount(Number(prof?.rating_count ?? 0));
 
         setGroupsCreated((createdCountResp.count as number | null) ?? 0);
         setGroupsJoined((joinedCountResp.count as number | null) ?? 0);
@@ -711,93 +894,157 @@ useEffect(() => {
       {/* Header */}
       <div className="mb-6 flex items-center gap-4">
         <div className="grid h-16 w-16 place-content-center rounded-full bg-emerald-100 text-emerald-800 ring-1 ring-emerald-300/60 overflow-hidden">
-          {avatarUrl ? (
-            <img src={avatarUrl} alt="" className="h-16 w-16 object-cover" />
+          {headerAvatar ? (
+            <img src={headerAvatar} alt="" className="h-16 w-16 object-cover" />
           ) : (
-            <span className="text-2xl font-semibold tracking-wide">{initials}</span>
+            <span className="text-2xl font-semibold tracking-wide">{headerInitials}</span>
           )}
         </div>
         <div className="flex-1">
-          <div className="text-lg font-semibold text-neutral-900">{name || email}</div>
-          <div className="text-sm text-neutral-600">{email}</div>
-                    <div className="mt-2 flex items-center gap-2">
-            {/* Removed "Created" link */}
-            <div ref={notifRef} className="relative">
-              <button
-                onClick={() => setNotifOpen(v => !v)}
-                className="ml-2 inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1.5 text-sm hover:bg-black/[0.04]"
-                title="Notifications"
-                aria-label="Notifications"
-              >
-                <span className="text-base">🔔</span>
-                {notifCount > 0 && (
-                  <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-white text-xs leading-none">{notifCount}</span>
-                )}
-              </button>
-              {notifOpen && (
-                <div className="absolute right-0 z-50 mt-1 w-96 max-w-[92vw] overflow-hidden rounded-xl border border-black/10 bg-white shadow-xl">
-                  <div className="flex items-center justify-between border-b border-black/10 bg-neutral-50 px-3 py-2">
-                    <div className="text-sm font-medium text-neutral-800">Notifications</div>
-                    <span className="rounded-full bg-neutral-200 px-2 py-0.5 text-[11px] text-neutral-800">{notifCount}</span>
-                  </div>
-                  <div className="max-h-80 overflow-y-auto p-2">
-                    {/* Friend requests */}
-                    <div className="mb-2">
-                      <div className="mb-1 text-xs font-semibold text-neutral-700">Friend requests</div>
-                      {incomingRequests.length === 0 ? (
-                        <div className="rounded-md border border-black/5 bg-neutral-50 px-2 py-2 text-xs text-neutral-600">No new requests</div>
-                      ) : (
-                        <ul className="space-y-1">
-                          {incomingRequests.slice(0, 5).map(r => {
-                            const other = r.user_id_a === uid ? r.user_id_b : r.user_id_a;
-                            const nm = friendProfiles.get(other)?.name || other.slice(0,6);
-                            return (
-                              <li key={r.id} className="flex items-center justify-between rounded-md border border-black/10 px-2 py-1.5">
-                                <span className="truncate text-sm text-neutral-800">{nm}</span>
-                                <div className="flex items-center gap-2">
-                                  <button onClick={() => acceptFriend(other)} className="rounded-md bg-emerald-600 px-2 py-0.5 text-xs text-white">Accept</button>
-                                  <button onClick={() => removeFriend(other)} className="rounded-md border border-black/10 px-2 py-0.5 text-xs">Decline</button>
-                                </div>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      )}
-                    </div>
-                    {/* Group messages */}
-<div className="mb-2">
-  <div className="mb-1 text-xs font-semibold text-neutral-700">Group messages</div>
-  {groupNotifs.length === 0 ? (
-    <div className="rounded-md border border-black/5 bg-neutral-50 px-2 py-2 text-xs text-neutral-600">No new messages</div>
-  ) : (
-    <ul className="divide-y">
-      {groupNotifs.slice(0, 5).map(gn => (
-        <li key={`${gn.group_id}-${gn.created_at}`} className="flex items-center justify-between py-2">
-          <div className="min-w-0 pr-2">
-            <div className="truncate text-sm font-medium text-neutral-900">{gn.group_title || gn.group_id.slice(0,6)}</div>
-            <div className="truncate text-xs text-neutral-600">{gn.preview}</div>
-          </div>
-          <button onClick={() => openGroup(gn.group_id)} className="shrink-0 rounded-md border border-black/10 px-2 py-0.5 text-xs">Open</button>
-        </li>
-      ))}
-    </ul>
+          <div className="text-lg font-semibold text-neutral-900">{headerName}</div>
+          {!viewingOther && <div className="text-sm text-neutral-600">{email}</div>}
+          <div className="mt-1 flex items-center gap-3 text-sm text-neutral-700">
+  {/* Average stars (0–6) + total count */}
+  <span
+    title={`${headerRatingAvg.toFixed(1)} / 6 from ${headerRatingCount} ratings`}
+    className="inline-flex items-center gap-1"
+  >
+    {Array.from({ length: 6 }).map((_, i) => (
+      <span key={i}>
+        {i < Math.round(headerRatingAvg || 0) ? '★' : '☆'}
+      </span>
+    ))}
+    <span className="ml-1 text-xs text-neutral-500">
+      ({headerRatingCount || 0})
+    </span>
+  </span>
+
+  {/* Interactive rater for viewing other profiles */}
+  {viewingOther && (
+    <div className="ml-2 inline-flex items-center gap-2">
+      <span className="text-xs text-neutral-500">Rate:</span>
+      {Array.from({ length: 6 }).map((_, idx) => {
+        const n = idx + 1; // 1..6
+        const active = (hoverRating ?? myRating) >= n;
+        return (
+          <button
+            key={n}
+            type="button"
+            disabled={!viewAllowRatings || rateBusy}
+            onMouseEnter={() => setHoverRating(n)}
+            onMouseLeave={() => setHoverRating(null)}
+            onClick={() => rateUser(n)}
+            className={`text-lg leading-none ${
+              (!viewAllowRatings || rateBusy)
+                ? 'opacity-40 cursor-not-allowed'
+                : 'hover:scale-110 transition-transform'
+            } ${active ? 'text-emerald-600' : 'text-neutral-400'}`}
+            aria-label={`Give ${n} star${n > 1 ? 's' : ''}`}
+            title={viewAllowRatings ? `${n} / 6` : 'Ratings disabled'}
+          >
+            {active ? '★' : '☆'}
+          </button>
+        );
+      })}
+      <button
+        type="button"
+        disabled={!viewAllowRatings || rateBusy}
+        onClick={() => rateUser(0)}
+        className={`ml-1 rounded border border-black/10 px-2 py-0.5 text-[11px] ${
+          (!viewAllowRatings || rateBusy)
+            ? 'opacity-40 cursor-not-allowed'
+            : 'hover:bg-black/[0.04]'
+        }`}
+        title={viewAllowRatings ? 'Clear my rating' : 'Ratings disabled'}
+      >
+        Clear
+      </button>
+      {!canRate && (
+  <span className="ml-1 text-[11px] text-neutral-500">
+    Next in {fmtCooldown(cooldownSecs)}
+  </span>
+)}
+    </div>
   )}
 </div>
+
+          {!viewingOther && (
+            <div className="mt-2 flex items-center gap-2">
+              <div ref={notifRef} className="relative">
+                <button
+                  onClick={() => setNotifOpen(v => !v)}
+                  className="ml-2 inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1.5 text-sm hover:bg-black/[0.04]"
+                  title="Notifications"
+                  aria-label="Notifications"
+                >
+                  <span className="text-base">🔔</span>
+                  {notifCount > 0 && (
+                    <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-white text-xs leading-none">{notifCount}</span>
+                  )}
+                </button>
+                {notifOpen && (
+                  <div className="absolute right-0 z-50 mt-1 w-96 max-w-[92vw] overflow-hidden rounded-xl border border-black/10 bg-white shadow-xl">
+                    <div className="flex items-center justify-between border-b border-black/10 bg-neutral-50 px-3 py-2">
+                      <div className="text-sm font-medium text-neutral-800">Notifications</div>
+                      <span className="rounded-full bg-neutral-200 px-2 py-0.5 text-[11px] text-neutral-800">{notifCount}</span>
+                    </div>
+                    <div className="max-h-80 overflow-y-auto p-2">
+                      {/* Friend requests */}
+                      <div className="mb-2">
+                        <div className="mb-1 text-xs font-semibold text-neutral-700">Friend requests</div>
+                        {incomingRequests.length === 0 ? (
+                          <div className="rounded-md border border-black/5 bg-neutral-50 px-2 py-2 text-xs text-neutral-600">No new requests</div>
+                        ) : (
+                          <ul className="space-y-1">
+                            {incomingRequests.slice(0, 5).map(r => {
+                              const other = r.user_id_a === uid ? r.user_id_b : r.user_id_a;
+                              const nm = friendProfiles.get(other)?.name || other.slice(0,6);
+                              return (
+                                <li key={r.id} className="flex items-center justify-between rounded-md border border-black/10 px-2 py-1.5">
+                                  <span className="truncate text-sm text-neutral-800">{nm}</span>
+                                  <div className="flex items-center gap-2">
+                                    <button onClick={() => acceptFriend(other)} className="rounded-md bg-emerald-600 px-2 py-0.5 text-xs text-white">Accept</button>
+                                    <button onClick={() => removeFriend(other)} className="rounded-md border border-black/10 px-2 py-0.5 text-xs">Decline</button>
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
+                      {/* Group messages */}
+                      <div className="mb-2">
+                        <div className="mb-1 text-xs font-semibold text-neutral-700">Group messages</div>
+                        {groupNotifs.length === 0 ? (
+                          <div className="rounded-md border border-black/5 bg-neutral-50 px-2 py-2 text-xs text-neutral-600">No new messages</div>
+                        ) : (
+                          <ul className="divide-y">
+                            {groupNotifs.slice(0, 5).map(gn => (
+                              <li key={`${gn.group_id}-${gn.created_at}`} className="flex items-center justify-between py-2">
+                                <div className="min-w-0 pr-2">
+                                  <div className="truncate text-sm font-medium text-neutral-900">{gn.group_title || gn.group_id.slice(0,6)}</div>
+                                  <div className="truncate text-xs text-neutral-600">{gn.preview}</div>
+                                </div>
+                                <button onClick={() => openGroup(gn.group_id)} className="shrink-0 rounded-md border border-black/10 px-2 py-0.5 text-xs">Open</button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
+              <button
+                onClick={openSettings}
+                className="ml-2 rounded-md border border-black/10 bg-white px-3 py-1.5 text-sm hover:bg-black/[0.04]"
+              >
+                Settings
+              </button>
             </div>
-            <button
-              onClick={openSettings}
-              className="ml-2 rounded-md border border-black/10 bg-white px-3 py-1.5 text-sm hover:bg-black/[0.04]"
-            >
-              Settings
-            </button>
-            {/* Removed "Create Groups" button */}
-          </div>
+          )}
         </div>
       </div>
-
       {/* Stats */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard label="Groups Created" value={groupsCreated} to="/browse?created=1" />
@@ -898,7 +1145,7 @@ useEffect(() => {
                 lastAt={t.last_at}
                 unread={t.unread}
                 onOpen={() => openThread(t.other_id)}
-                onView={() => openProfileView(t.other_id)}
+            
               />
             ))}
           </Card>
@@ -924,7 +1171,7 @@ useEffect(() => {
           </section>
         )}
         </div>
-        {sidebarOpen && (
+        {!viewingOther && sidebarOpen && (
           <aside
             ref={sidebarRef}
             className="rounded-2xl border border-black/10 bg-white p-4 shadow-sm h-max sticky top-4 transition-all duration-300"
@@ -969,7 +1216,7 @@ useEffect(() => {
                               </button>
                               <button
                                 onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => { setThreadQuery(""); openProfileView(o.id); }}
+                                onClick={() => { setThreadQuery(""); navigate(`/profile/${o.id}`); }}
                                 className="rounded-md bg-emerald-600 px-2 py-1 text-xs text-white hover:bg-emerald-700"
                               >
                                 View
@@ -1065,7 +1312,7 @@ useEffect(() => {
           )}
           </aside>
         )}
-        {!sidebarOpen && (
+        {!viewingOther && !sidebarOpen && (
           <button
             onClick={() => {
               setSidebarOpen(true);
@@ -1243,6 +1490,20 @@ useEffect(() => {
   />
   <label htmlFor="pushNotifs" className="text-sm text-neutral-800">Push notifications</label>
 </div>
+<div className="flex items-center justify-between gap-2">
+  <div>
+    <div className="text-sm font-medium text-neutral-800">Allow profile ratings</div>
+    <div className="text-[11px] text-neutral-500">Others can rate you when enabled.</div>
+  </div>
+  <button
+    type="button"
+    onClick={() => saveAllowRatings(!allowRatings)}
+    className={`h-7 w-12 rounded-full ${allowRatings ? 'bg-emerald-600' : 'bg-neutral-300'} relative`}
+    aria-pressed={allowRatings}
+  >
+    <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white transition ${allowRatings ? 'right-0.5' : 'left-0.5'}`} />
+  </button>
+</div>
           {settingsMsg && (
             <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {settingsMsg}
@@ -1291,7 +1552,32 @@ useEffect(() => {
                 )}
               </div>
               <div>
-                <div className="text-base font-semibold text-neutral-900">{viewName}</div>
+                <div className="flex items-center gap-2">
+                  <div className="text-base font-semibold text-neutral-900">{viewName}</div>
+                  <div className="flex items-center text-neutral-800">
+                    <div className="flex items-center gap-2">
+                      <button
+  type="button"
+  disabled={!viewAllowRatings || rateBusy}
+  onClick={() => rateUser(5)}
+  className={`text-lg ${(!viewAllowRatings || rateBusy) ? 'opacity-50 cursor-not-allowed' : 'hover:scale-110 transition-transform'} ${myRating === 5 ? 'text-green-600' : 'text-neutral-400'}`}
+  title={viewAllowRatings ? 'Thumbs up' : 'Ratings disabled'}
+>
+  👍
+</button>
+<button
+  type="button"
+  disabled={!viewAllowRatings || rateBusy}
+  onClick={() => rateUser(1)}
+  className={`text-lg ${(!viewAllowRatings || rateBusy) ? 'opacity-50 cursor-not-allowed' : 'hover:scale-110 transition-transform'} ${myRating === 1 ? 'text-red-600' : 'text-neutral-400'}`}
+  title={viewAllowRatings ? 'Thumbs down' : 'Ratings disabled'}
+>
+  👎
+</button>
+                      <span className="ml-1 text-[11px] text-neutral-500">({viewRatingCount})</span>
+                    </div>
+                  </div>
+                </div>
                 <div className="text-xs text-neutral-600">{viewUserId}</div>
               </div>
             </div>
@@ -1386,7 +1672,7 @@ function Row({ id, title, meta }: { id: string; title: string; meta: string }) {
   );
 }
 
-function FriendRow({ _otherId, name, avatarUrl, lastBody, lastAt, unread, onOpen, onView }: {
+function FriendRow({ _otherId, name, avatarUrl, lastBody, lastAt, unread, onOpen }: {
   _otherId: string;
   name: string;
   avatarUrl: string | null;
@@ -1394,7 +1680,6 @@ function FriendRow({ _otherId, name, avatarUrl, lastBody, lastAt, unread, onOpen
   lastAt: string;
   unread: boolean;
   onOpen: () => void;
-  onView: () => void;
 }) {
   return (
     <li className="flex items-center justify-between py-2">
@@ -1414,7 +1699,7 @@ function FriendRow({ _otherId, name, avatarUrl, lastBody, lastAt, unread, onOpen
       <div className="flex items-center gap-3">
                <span className="text-[10px] text-neutral-500">{timeAgo(lastAt)}</span>
         {unread && <span className="h-2 w-2 rounded-full bg-emerald-600" />}
-        <button onClick={onView} className="text-sm text-neutral-700 hover:underline">View</button>
+        <Link to={`/profile/${_otherId}`} className="text-sm text-neutral-700 hover:underline">View</Link>
         <button onClick={onOpen} className="text-sm text-emerald-700 hover:underline">Chat</button>
       </div>
     </li>

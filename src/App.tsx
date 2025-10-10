@@ -219,6 +219,14 @@ export default function App() {
               }
             />
             <Route
+              path="/profile/:userId"
+              element={
+                <RequireAuth>
+                  <Profile />
+                </RequireAuth>
+              }
+            />
+            <Route
               path="/create"
               element={
                 <RequireAuth>
