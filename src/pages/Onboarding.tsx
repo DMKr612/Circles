@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { supabase } from "../lib/supabase";
 
@@ -48,6 +48,7 @@ export default function Onboarding() {
   const [authBusy, setAuthBusy] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const navigate = useNavigate();
+  const location = useLocation() as any;
   const prefersReducedMotion = useReducedMotion();
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -57,9 +58,31 @@ export default function Onboarding() {
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
-      setUserEmail(data.user?.email ?? null);
+      const user = data.user;
+      setUserEmail(user?.email ?? null);
+      if (user) {
+        // Skip onboarding if logged in
+        localStorage.setItem("onboardingSeen", "1");
+        const ls = localStorage.getItem("postLoginRedirect");
+        const fromState = location?.state?.from as string | undefined;
+        const dest = ls || fromState || "/profile";
+        if (ls) localStorage.removeItem("postLoginRedirect");
+        navigate(dest, { replace: true });
+      }
     });
-  }, []);
+  }, [navigate, location]);
+
+  useEffect(() => {
+    const sub = supabase.auth.onAuthStateChange((_evt, session) => {
+      if (!session?.user) return;
+      const ls = localStorage.getItem("postLoginRedirect");
+      const fromState = location?.state?.from as string | undefined;
+      const dest = ls || fromState || "/profile";
+      if (ls) localStorage.removeItem("postLoginRedirect");
+      navigate(dest, { replace: true });
+    });
+    return () => { sub.data.subscription.unsubscribe(); };
+  }, [location, navigate]);
 
   const isLast = index === SLIDES.length - 1;
 

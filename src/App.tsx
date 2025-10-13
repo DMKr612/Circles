@@ -30,6 +30,7 @@ import Profile from "./pages/Profile";
 import GroupsByGame from "./pages/groups/GroupsByGame";
 import MyGroups from "./pages/groups/MyGroups";
 const Onboarding = lazy(() => import("./pages/Onboarding"));
+const JoinByCode = lazy(() => import("./pages/JoinByCode"));
 
 /* =========================
    Auth (single source)
@@ -114,7 +115,7 @@ function FloatingNav() {
           <span className="text-2xl">🔍</span>
         </Link>
         <Link
-          to="/"
+          to="/profile"
           className="grid h-12 w-12 place-items-center rounded-full border border-black/10 hover:bg-black/[0.04]"
           aria-label="Home"
           title="Home"
@@ -208,6 +209,7 @@ export default function App() {
             <Route path="/onboarding" element={<Onboarding />} />
             <Route path="/browse" element={<BrowsePage />} />
             <Route path="/groups" element={<Groups />} />
+            <Route path="/invite/:code" element={<JoinByCode />} />
 
             {/* Protected */}
             <Route

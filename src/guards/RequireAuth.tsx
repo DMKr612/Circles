@@ -1,24 +1,26 @@
-import { useEffect, useState } from "react";
-import { Navigate, useLocation } from "react-router-dom";
-import { supabase } from "../lib/supabase";
 
-export default function RequireAuth({ children }: { children: JSX.Element }) {
-  const [loading, setLoading] = useState(true);
-  const [authed, setAuthed] = useState<boolean | null>(null);
+import React, { useEffect, useState } from 'react';
+import { Navigate, useLocation } from 'react-router-dom';
+import { supabase } from '@/lib/supabase';
+
+export default function RequireAuth({ children }: React.PropsWithChildren): JSX.Element | null {
+  const [ready, setReady] = useState(false);
+  const [ok, setOk] = useState(false);
   const loc = useLocation();
 
   useEffect(() => {
-    let mounted = true;
+    let alive = true;
     (async () => {
       const { data } = await supabase.auth.getUser();
-      if (!mounted) return;
-      setAuthed(!!data.user);
-      setLoading(false);
+      if (!alive) return;
+      setOk(!!data.user);
+      setReady(true);
     })();
-    return () => { mounted = false; };
+    return () => { alive = false; };
   }, []);
 
-  if (loading) return null; // prevents flash + wrong redirect
-  if (!authed) return <Navigate to="/login" replace state={{ from: loc }} />;
-  return children;
+  if (!ready) return null; // small loading gap
+  return ok ? <>{children}</> : (
+    <Navigate to="/onboarding" state={{ from: loc.pathname }} replace />
+  );
 }

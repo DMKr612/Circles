@@ -10,6 +10,7 @@ console.log('[SUPABASE]', import.meta.env?.VITE_SUPABASE_URL, String((import.met
  type Group = {
   id: string;
   host_id: string;
+  creator_id?: string | null;  // ← add this line
   title: string;
   purpose: string | null; // description
   category: string | null;
@@ -46,6 +47,13 @@ export default function GroupDetail() {
   const [me, setMe] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Share invite state
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+
+  // I am host if I match host_id or creator_id (used across UI)
+  const isHost = !!(me && group && (me === group.host_id || (group?.creator_id ?? null) === me));
+
   // Chat modal state
   const [chatOpen, setChatOpen] = useState(false);
   const [chatFull, setChatFull] = useState(false);
@@ -80,6 +88,31 @@ export default function GroupDetail() {
       setTimeout(() => setCopied(false), 1500);
     } catch (e) {
       console.warn('Clipboard failed', e);
+    }
+  }
+
+  // Share invite: create an invite link and copy to clipboard
+  async function createInvite() {
+    if (!group?.id) return;
+    try {
+      setShareBusy(true);
+      const { data: auth } = await supabase.auth.getUser();
+      if (!auth?.user) {
+        // send to onboarding, then bounce back
+        localStorage.setItem('postLoginRedirect', window.location.pathname);
+        window.location.href = `${window.location.origin}/onboarding`;
+        return;
+      }
+      const { data: code, error } = await supabase.rpc('make_group_invite', {
+        p_group_id: group.id,
+        p_hours: 168,     // 7 days; set null for no expiry
+        p_max_uses: null  // unlimited; set a number to cap
+      });
+      if (error) { setMsg(error.message); return; }
+      const url = `${window.location.origin}/invite/${code}`;
+      try { await navigator.clipboard.writeText(url); setShareCopied(true); setTimeout(()=>setShareCopied(false), 1500); } catch {}
+    } finally {
+      setShareBusy(false);
     }
   }
   useEffect(() => {
@@ -231,7 +264,7 @@ async function removeMember(userId: string) {
   const { data: auth } = await supabase.auth.getUser();
   const uid = auth?.user?.id;
   if (!uid) { setMsg("Please sign in."); return; }
-  if (uid !== group.host_id) { setMsg("Only the host can remove members."); return; }
+  if (!isHost) { setMsg("Only the host can remove members."); return; }
   if (userId === group.host_id) { setMsg("Host cannot remove themselves."); return; }
 
   const ok = window.confirm("Remove this member from the group?");
@@ -403,7 +436,7 @@ async function joinGroup() {
     if (!group) return;
     const { data: auth } = await supabase.auth.getUser();
     if (!auth?.user) { setMsg("Please sign in."); nav("/login"); return; }
-    if (auth.user.id !== group.host_id) { setMsg("Only the host can create a vote."); return; }
+    if (!isHost) { setMsg("Only the host can create a vote."); return; }
     setNewTitle("Schedule");
     setNewOptions("");
     setCreateOpen(true);
@@ -413,7 +446,7 @@ async function joinGroup() {
     if (!group) return;
     const { data: auth } = await supabase.auth.getUser();
     if (!auth?.user) { setMsg("Please sign in."); nav("/login"); return; }
-    if (auth.user.id !== group.host_id) { setMsg("Only the host can create a vote."); return; }
+    if (!isHost) { setMsg("Only the host can create a vote."); return; }
 
     const { data: created, error: pErr } = await supabase
       .from("group_polls")
@@ -517,7 +550,7 @@ return (
           </div>
           <ul className="mt-3 space-y-2">
             {members.map((m) => {
-              const isHost = m.user_id === group!.host_id;
+              const memberIsHost = m.user_id === group!.host_id;
               const label = m.name ?? m.user_id.slice(0, 6);
               return (
                 <li key={m.user_id} className="flex items-center justify-between rounded-xl border border-black/10 px-2.5 py-1.5 text-sm bg-neutral-50">
@@ -531,7 +564,7 @@ return (
                     >
                       {label}
                     </button>
-                    {me === group!.host_id && m.user_id !== group!.host_id && (
+                    {isHost && m.user_id !== group!.host_id && (
                       <button
                         onClick={() => removeMember(m.user_id)}
                         className="ml-1 text-[11px] rounded border border-black/10 px-2 py-0.5 hover:bg-black/5"
@@ -542,7 +575,7 @@ return (
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    {isHost && (
+                    {memberIsHost && (
                       <span className="text-[10px] rounded-full bg-amber-500/15 text-amber-700 px-2 py-0.5">HOST</span>
                     )}
                   </div>
@@ -601,8 +634,16 @@ return (
                   <button onClick={leaveGroup} className="rounded-lg border border-black/10 bg-white px-3 py-1.5 text-sm font-medium hover:bg-black/[0.04]">Leave</button>
                 )}
                 <button onClick={() => setChatOpen(true)} className="rounded-lg border border-black/10 bg-white px-3 py-1.5 text-sm font-medium hover:bg-black/[0.04]">Open Chat</button>
-                {me === group!.host_id && (
+                {isHost && (
                   <>
+                    <button
+                      onClick={createInvite}
+                      disabled={shareBusy}
+                      className="rounded-lg border border-black/10 bg-white px-3 py-1.5 text-sm font-medium hover:bg-black/[0.04] disabled:opacity-60"
+                      title="Create an invite link and copy it"
+                    >
+                      {shareBusy ? 'Creating…' : (shareCopied ? 'Copied!' : 'Share invite')}
+                    </button>
                     <button onClick={createVoting} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">Create Voting</button>
                     <button onClick={handleDelete} className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700">Delete</button>
                   </>
@@ -633,7 +674,7 @@ return (
           <section id="polls" className="mt-6 rounded-2xl border border-black/10 bg-white p-5 shadow">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-neutral-900">Voting</h2>
-              {me === group!.host_id && poll && <span className="text-xs text-neutral-600">Open</span>}
+              {isHost && poll && <span className="text-xs text-neutral-600">Open</span>}
             </div>
 
             {!poll && <div className="mt-2 text-sm text-neutral-600">No active voting.</div>}
@@ -747,6 +788,9 @@ return (
   </>
 );
 }
+
+
+
 
 // --- Chat Panel (slide-in) ---
 function ChatPanel({ groupId, onClose, full, setFull }: { groupId: string; onClose: () => void; full: boolean; setFull: (v: boolean) => void }) {
