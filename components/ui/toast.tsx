@@ -1,4 +1,6 @@
-import { createContext, useContext, useState, ReactNode } from "react";
+import { createContext, useContext, useState } from "react";
+import type { ReactNode } from "react";
+
 type Toast = { id: number; text: string };
 const Ctx = createContext<{push:(t:string)=>void; list:Toast[]}>({push:()=>{}, list:[]});
 export function ToastProvider({ children }: { children: ReactNode }) {

@@ -14,12 +14,13 @@ import {
   Route,
   Link,
   Navigate,
+  Outlet,
   useLocation,
-  useNavigate,
   useParams,
 } from "react-router-dom";
 import type { User } from "@supabase/supabase-js";
-import { supabase } from "./lib/supabase";
+import { supabase } from "@/lib/supabase";
+import { ToastProvider } from '@/components/Toaster';
 
 // Pages
 import BrowsePage from "./pages/Browse";
@@ -68,11 +69,11 @@ function AuthProvider({ children }: PropsWithChildren) {
 /* =========================
    Guards
    ========================= */
-function RequireAuth({ children }: PropsWithChildren) {
+function RequireAuth({ children }: PropsWithChildren): JSX.Element | null {
   const { user, loading } = useAuth();
   const loc = useLocation();
   if (loading) return null;
-  if (!user) return <Navigate to="/onboarding" replace state={{ from: loc }} />;
+  if (!user) return <Navigate to="/onboarding" replace state={{ from: loc.pathname }} />;
   return <>{children}</>;
 }
 
@@ -81,7 +82,7 @@ function RequireAuth({ children }: PropsWithChildren) {
    ========================= */
 function HomeButton() {
   return (
-    <div className="fixed top-4 left-4 z-50">
+    <div className="fixed fab-offset-top left-4 z-50">
       <Link
         to="/onboarding"
         className="flex items-center justify-center h-10 w-10 rounded-full border border-black/10 bg-white/90 text-xl shadow-md hover:bg-black/[0.04]"
@@ -95,7 +96,6 @@ function HomeButton() {
 }
 
 function FloatingNav() {
-  const nav = useNavigate();
   const { user } = useAuth();
   const location = useLocation();
   const onOnboarding = location.pathname.startsWith("/onboarding");
@@ -139,10 +139,10 @@ function FloatingNav() {
    Error Boundary
    ========================= */
 class AppErrorBoundary extends React.Component<
-  PropsWithChildren,
+  { children?: React.ReactNode },
   { error: unknown }
 > {
-  constructor(props: PropsWithChildren) {
+  constructor(props: { children?: React.ReactNode }) {
     super(props);
     this.state = { error: null };
   }
@@ -189,86 +189,69 @@ function GroupRedirect() {
    App
    ========================= */
 export default function App() {
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
+  // Disable browser scroll restoration (prevents loading at old offsets)
+  useEffect(() => {
+    try {
+      if ('scrollRestoration' in history) {
+        (history as any).scrollRestoration = 'manual';
+      }
+    } catch {}
+  }, []);
+
+  // Always reset scroll to top on route changes
+  const loc = useLocation();
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [loc.pathname, loc.search]);
+
   return (
-    <AuthProvider>
-      <HomeButton />
-      <FloatingNav />
-      <AppErrorBoundary>
-        <Suspense
-          fallback={
-            <div className="grid min-h-screen place-items-center text-sm text-neutral-600">
-              Loading…
-            </div>
-          }
-        >
-          <Routes>
-            {/* Root: go to profile if logged in, else onboarding */}
-            <Route path="/" element={<RootRoute />} />
+    <div id="page-root" className="min-h-dvh flow-root flex flex-col">
+      <AuthProvider>
+        <ToastProvider>
+          <HomeButton />
+          <FloatingNav />
+          <AppErrorBoundary>
+            <Suspense
+              fallback={
+                <div className="grid min-h-dvh place-items-center text-sm text-neutral-600">
+                  Loading…
+                </div>
+              }
+            >
+              <Routes>
+                {/* Root: go to profile if logged in, else onboarding */}
+                <Route path="/" element={<RootRoute />} />
 
-            {/* Public */}
-            <Route path="/onboarding" element={<Onboarding />} />
-            <Route path="/browse" element={<BrowsePage />} />
-            <Route path="/groups" element={<Groups />} />
-            <Route path="/invite/:code" element={<JoinByCode />} />
+                {/* Public */}
+                <Route path="/onboarding" element={<Onboarding />} />
+                <Route path="/browse" element={<BrowsePage />} />
+                <Route path="/groups" element={<Groups />} />
+                <Route path="/invite/:code" element={<JoinByCode />} />
 
-            {/* Protected */}
-            <Route
-              path="/profile"
-              element={
-                <RequireAuth>
-                  <Profile />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/profile/:userId"
-              element={
-                <RequireAuth>
-                  <Profile />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/create"
-              element={
-                <RequireAuth>
-                  <CreateGroup />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/group/:id"
-              element={
-                <RequireAuth>
-                  <GroupDetail />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/groups/game/:game"
-              element={
-                <RequireAuth>
-                  <GroupsByGame />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/groups/mine"
-              element={
-                <RequireAuth>
-                  <MyGroups />
-                </RequireAuth>
-              }
-            />
+                {/* Protected */}
+                <Route element={<RequireAuth><Outlet /></RequireAuth>}>
+                  <Route path="/profile" element={<Profile />} />
+                  <Route path="/profile/:userId" element={<Profile />} />
+                  <Route path="/create" element={<CreateGroup />} />
+                  <Route path="/group/:id" element={<GroupDetail />} />
+                  <Route path="/groups/game/:game" element={<GroupsByGame />} />
+                  <Route path="/groups/mine" element={<MyGroups />} />
+                </Route>
 
-            {/* Legacy redirect */}
-            <Route path="/groups/:id" element={<GroupRedirect />} />
+                {/* Legacy redirect */}
+                <Route path="/groups/:id" element={<GroupRedirect />} />
 
-            {/* Catch-all */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </Suspense>
-      </AppErrorBoundary>
-    </AuthProvider>
+                {/* Catch-all */}
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </Suspense>
+          </AppErrorBoundary>
+        </ToastProvider>
+      </AuthProvider>
+    </div>
   );
 }

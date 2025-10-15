@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { supabase } from "../lib/supabase";
+import { supabase } from "@/lib/supabase";
 
 type Slide = {
   title: string;
@@ -96,8 +96,8 @@ export default function Onboarding() {
 
   function next() {
     if (isLast) {
-      localStorage.setItem("onboardingSeen", "1");
-      navigate("/auth");
+      // stay on the last slide and show auth options instead of navigating away
+      setShowEmailForm(true);
     } else {
       setIndex((i) => Math.min(i + 1, SLIDES.length - 1));
     }
@@ -120,7 +120,8 @@ export default function Onboarding() {
 
   function skip() {
     localStorage.setItem("onboardingSeen", "1");
-    navigate("/auth");
+    setIndex(SLIDES.length - 1);
+    setShowEmailForm(true);
   }
 
   // swipe/drag navigation
@@ -163,12 +164,11 @@ export default function Onboarding() {
       if (authMode === "signup") {
         const { error } = await supabase.auth.signUp({ email: email.trim(), password: password.trim() });
         if (error) throw error;
-        // signed up – take them in
-        navigate("/browse", { replace: true });
+        // Do not navigate here; onAuthStateChange will redirect appropriately
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: password.trim() });
         if (error) throw error;
-        navigate("/browse", { replace: true });
+        // Do not navigate here; onAuthStateChange will redirect appropriately
       }
     } catch (err: any) {
       setAuthErr(err?.message ?? "Authentication failed");

@@ -1,7 +1,9 @@
 import React, { useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
-import { supabase } from "../lib/supabase";
+import { supabase } from "@/lib/supabase";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useLocation } from "react-router-dom";
+import { useToast } from '@/components/Toaster';
+
 
 
 // Types
@@ -42,6 +44,7 @@ type GroupMsgNotif = {
 export default function Profile() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { success, error } = useToast();
   const { userId: routeUserId } = useParams<{ userId?: string }>();
   useLayoutEffect(() => {
     if (location.hash === "#chat") {
@@ -599,21 +602,24 @@ function deviceTZ(): string {
       const timezone = sTimezone.trim() || "UTC";
       const interests = sInterests.split(",").map(s => s.trim()).filter(Boolean);
 
-      const { error } = await supabase
+      const { error: updateError } = await supabase
         .from("profiles")
         .update({ name, city, timezone, interests })
         .eq("user_id", uid);
 
-      if (error) throw error;
+      if (updateError) throw updateError;
       setName(name);
       setSettingsMsg("Saved.");
+      success('Profile saved');
       localStorage.setItem('theme', sTheme);
       localStorage.setItem('emailNotifs', emailNotifs ? '1' : '0');
       localStorage.setItem('pushNotifs', pushNotifs ? '1' : '0');
       applyTheme(sTheme);
       setSettingsOpen(false);
     } catch (err: any) {
-      setSettingsMsg(err?.message || "Failed to save");
+      const msg = err?.message || "Failed to save";
+      setSettingsMsg(msg);
+      error(msg);
     } finally {
       setSettingsSaving(false);
     }
@@ -888,7 +894,7 @@ setFriendProfiles(m);
   );
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6">
+    <div className="mx-auto max-w-6xl px-4 pt-16 md:pt-20 pb-0">
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         <div className="space-y-6">
       {/* Header */}
