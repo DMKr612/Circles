@@ -178,7 +178,7 @@ useEffect(() => {
     setLoading(true);
     const { data, error } = await supabase
       .from("group_messages")
-      .select("id,group_id,user_id,content,created_at,parent_id,attachments")
+      .select("id,group_id,user_id:author_id,content,created_at,parent_id,attachments")
       .eq("group_id", groupId)
       .order("created_at", { ascending: false })
       .limit(pageSize);
@@ -253,12 +253,29 @@ useEffect(() => {
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "group_messages" },
       async (payload) => {
-        const m = payload.new as ChatMessage;
-        if (m.group_id !== groupId) return; // ignore other groups
-        console.log("[realtime] INSERT group_messages:", m);
+        const raw = payload.new as any;
+        if (raw.group_id !== groupId) return;
+        const m: ChatMessage = {
+          id: raw.id,
+          group_id: raw.group_id,
+          user_id: raw.user_id ?? raw.author_id,
+          content: raw.content,
+          created_at: raw.created_at,
+          parent_id: raw.parent_id ?? null,
+          attachments: raw.attachments ?? []
+        };
+        console.log('[realtime] INSERT group_messages:', m);
         setMsgs(prev => {
-          if (prev.find(x => x.id === m.id)) return prev;
-          const next = [...prev, m].sort((a,b) => +new Date(a.created_at) - +new Date(b.created_at));
+          // remove matching phantom (same author+content created recently)
+          const cutoff = Date.now() - 30_000;
+          const cleaned = prev.filter(p => {
+            if (!p.id.startsWith('phantom-')) return true;
+            if (p.user_id !== m.user_id) return true;
+            if (p.content !== m.content) return true;
+            return +new Date(p.created_at) < cutoff; // keep very old phantoms
+          });
+          if (cleaned.find(x => x.id === m.id)) return cleaned;
+          const next = [...cleaned, m].sort((a,b) => +new Date(a.created_at) - +new Date(b.created_at));
           return next;
         });
         if (!profiles.get(m.user_id)) {
@@ -352,7 +369,7 @@ presence.on("presence", { event: "sync" }, () => {
     if (!earliestTs || !hasMore) return;
     const { data, error } = await supabase
       .from("group_messages")
-      .select("id,group_id,user_id,content,created_at,parent_id,attachments")
+      .select("id,group_id,user_id:author_id,content,created_at,parent_id,attachments")
       .eq("group_id", groupId)
       .lt("created_at", earliestTs as string)
       .order("created_at", { ascending: false })
@@ -510,35 +527,33 @@ useEffect(() => {
       setFiles([]);
     }
 
-    const { data, error } = await supabase
-      .from("group_messages")
-      .insert({
-        group_id: groupId,
-        user_id: uid,
-        content: text,
-        parent_id: parentId,
-        attachments
-      })
-      .select("id,group_id,user_id,content,created_at,parent_id,attachments")
-      .single();
-
+    const { error } = await supabase.rpc('send_group_message', {
+      p_group_id: groupId,
+      p_content: text,
+    });
     setSending(false);
     if (error) {
-      console.error("[send] insert error", error);
+      console.error('[send] rpc error', error);
       setMsgs(prev => prev.filter(m => m.id !== phantomId));
       alert(error.message);
       return;
     }
-
-    console.log("[send] insert ok, replacing phantom:", { phantomId, realId: data?.id });
-    setMsgs(prev => {
-      const without = prev.filter(m => m.id !== phantomId);
-      if (without.find(m => m.id === data!.id)) return without;
-      return [...without, data as ChatMessage].sort((a,b)=>+new Date(a.created_at)-+new Date(b.created_at));
-    });
-
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    // Success: realtime handler will append the actual row; phantom will be removed there
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   };
+// Ensure current user is a member when this chat opens
+useEffect(() => {
+  (async () => {
+    if (!me || !groupId) return;
+    try {
+      await supabase
+        .from('group_members')
+        .insert({ group_id: groupId, user_id: me, role: 'member' });
+    } catch (e: any) {
+      // ignore unique_violation or RLS duplicate
+    }
+  })();
+}, [groupId, me]);
 
   const toggleReaction = async (messageId: string, emoji: string) => {
     if (!me) return;

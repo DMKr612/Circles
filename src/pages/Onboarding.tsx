@@ -135,7 +135,7 @@ export default function Onboarding() {
   // segmented progress (0..100)
   const progressPct = ((index + 1) / SLIDES.length) * 100;
 
-  const redirectTo = `${window.location.origin}/profile`;
+  const redirectTo = `${window.location.origin}/auth/callback`;
 
   async function loginFacebook() {
     try {
@@ -148,6 +148,20 @@ export default function Onboarding() {
       if (error) throw error;
     } catch (err: any) {
       setAuthErr(err?.message ?? "Failed to start Facebook login");
+    }
+  }
+
+  async function loginGoogle() {
+    try {
+      setAuthErr(null);
+      localStorage.setItem("onboardingSeen", "1");
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo },
+      });
+      if (error) throw error;
+    } catch (err: any) {
+      setAuthErr(err?.message ?? "Failed to start Google login");
     }
   }
 
@@ -180,7 +194,7 @@ export default function Onboarding() {
   return (
     <div
       ref={containerRef}
-      className="h-screen w-screen bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 text-white flex flex-col"
+      className="min-h-dvh w-full bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 text-white flex flex-col"
       aria-label="Onboarding"
     >
 
@@ -211,7 +225,7 @@ export default function Onboarding() {
                 <img
                   src={SLIDES[index].image}
                   alt={SLIDES[index].title}
-                  className="mx-auto mb-6 w-[32rem] h-[32rem] object-contain drop-shadow-2xl"
+                  className="mx-auto mb-6 w-full max-w-[28rem] md:max-w-[32rem] h-auto object-contain drop-shadow-2xl"
                   draggable={false}
                   onLoad={() => setImgOk(true)}
                   onError={(e) => { console.error('Onboarding image failed to load:', SLIDES[index].image); setImgOk(false); }}
@@ -223,6 +237,12 @@ export default function Onboarding() {
                 <div className="mt-6 w-full max-w-sm mx-auto">
                   {!showEmailForm ? (
                     <div className="grid grid-cols-1 gap-3">
+                      <button
+                        onClick={loginGoogle}
+                        className="w-full rounded-lg bg-white/90 px-4 py-3 font-semibold text-indigo-700 hover:bg-white"
+                      >
+                        Continue with Google
+                      </button>
                       <button
                         onClick={() => { setShowEmailForm(true); setAuthErr(null); }}
                         className="w-full rounded-lg bg-white text-indigo-700 px-4 py-3 font-semibold"
