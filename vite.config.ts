@@ -43,10 +43,10 @@ export default defineConfig({
       }
     })
   ],
+  base: '/circles/',
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
   },
 });
-
