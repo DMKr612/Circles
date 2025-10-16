@@ -555,6 +555,52 @@ useEffect(() => {
   })();
 }, [groupId, me]);
 
+// Mark this group's messages as read using server time (prevents clock skew)
+useEffect(() => {
+  (async () => {
+    if (!me || !groupId) return;
+    try {
+      await supabase.rpc('mark_group_read', { p_group_id: groupId });
+      // local broadcast so other components zero their badges immediately
+      try {
+        window.dispatchEvent(new CustomEvent('group-read', { detail: { groupId } }));
+        const ping = JSON.stringify({ gid: groupId, ts: Date.now() });
+        localStorage.setItem('group_read_ping', ping);
+        localStorage.removeItem('group_read_ping');
+      } catch {}
+      // also clear any toast/list notifications tied to this group
+      await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('user_id', me)
+        .eq('payload->>group_id', groupId)
+        .eq('is_read', false);
+    } catch (e) {
+      console.warn('[chat] mark-group-read rpc failed', e);
+    }
+  })();
+}, [groupId, me]);
+// Also refresh read cursor on window focus (keeps badges correct after tab switches)
+useEffect(() => {
+  if (!me || !groupId) return;
+  const onFocus = async () => {
+    try {
+      await supabase.rpc('mark_group_read', { p_group_id: groupId });
+      try {
+        window.dispatchEvent(new CustomEvent('group-read', { detail: { groupId } }));
+        const ping = JSON.stringify({ gid: groupId, ts: Date.now() });
+        localStorage.setItem('group_read_ping', ping);
+        localStorage.removeItem('group_read_ping');
+      } catch {}
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[mark_group_read focus]', e);
+    }
+  };
+  window.addEventListener('focus', onFocus);
+  return () => window.removeEventListener('focus', onFocus);
+}, [groupId, me]);
+
   const toggleReaction = async (messageId: string, emoji: string) => {
     if (!me) return;
     const current = reactions.get(messageId)?.[emoji] ?? [];

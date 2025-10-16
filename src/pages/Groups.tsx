@@ -85,6 +85,45 @@ const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
     })();
   }, []);
 
+  // live-update unread badges when my read cursor changes in any group
+  useEffect(() => {
+    if (!me) return;
+    const ch = supabase
+      .channel(`reads:${me}`)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'group_reads', filter: `user_id=eq.${me}` },
+        async (payload) => {
+          const gid = (payload.new as any)?.group_id || (payload.old as any)?.group_id;
+          if (!gid) return;
+          await refreshUnreadCounts([gid]);
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [me]);
+
+  // Fallback: refresh unread counts on window focus / visibility change / periodic
+  useEffect(() => {
+    if (!me) return;
+
+    const refreshAll = () => {
+      const ids = groups.map((g) => g.id);
+      if (ids.length) void refreshUnreadCounts(ids);
+    };
+
+    window.addEventListener('focus', refreshAll);
+    const onVis = () => { if (document.visibilityState === 'visible') refreshAll(); };
+    document.addEventListener('visibilitychange', onVis);
+
+    const timer = window.setInterval(refreshAll, 20000); // 20s lightweight poll
+
+    return () => {
+      window.removeEventListener('focus', refreshAll);
+      document.removeEventListener('visibilitychange', onVis);
+      window.clearInterval(timer);
+    };
+  }, [me, groups]);
+
   // Fetch groups whenever filters change
   useEffect(() => {
     let mounted = true;
@@ -255,40 +294,60 @@ const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   }
 
   async function refreshUnreadCounts(ids: string[]) {
-  try {
-    if (!me || !ids.length) return;
+    try {
+      if (!me || !ids.length) return;
 
-    // 1) last read per group for me
-    const { data: reads, error: rErr } = await supabase
-      .from('group_reads')
-      .select('group_id,last_read_at')
-      .eq('user_id', me)
-      .in('group_id', ids);
-    if (rErr) throw rErr;
+      // 1) last read per group for me
+      const { data: reads, error: rErr } = await supabase
+        .from('group_reads')
+        .select('group_id,last_read_at')
+        .eq('user_id', me)
+        .in('group_id', ids);
+      if (rErr) throw rErr;
 
-    const lastByGroup: Record<string, string | null> = {};
-    (reads ?? []).forEach((r: any) => { lastByGroup[r.group_id] = r.last_read_at ?? null; });
+      const lastByGroup: Record<string, string | null> = {};
+      (reads ?? []).forEach((r: any) => { lastByGroup[r.group_id] = r.last_read_at ?? null; });
 
-    // 2) count unread per group (simple per-group head count)
-    const pairs = ids.map(async (gid) => {
-      const last = lastByGroup[gid] ?? '1970-01-01T00:00:00Z';
-      const { count, error } = await supabase
-        .from('group_messages')
-        .select('id', { count: 'exact', head: true })
-        .eq('group_id', gid)
-        .gt('created_at', last);
-      if (error) return [gid, 0] as const;
-      return [gid, count ?? 0] as const;
-    });
+      // 2) count unread per group (simple per-group head count)
+      const pairs = ids.map(async (gid) => {
+        const last = lastByGroup[gid] ?? '1970-01-01T00:00:00Z';
+        const { count, error } = await supabase
+          .from('group_messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('group_id', gid)
+          .gt('created_at', last);
+        if (error) return [gid, 0] as const;
+        return [gid, count ?? 0] as const;
+      });
 
-    const results = await Promise.all(pairs);
-    const map: Record<string, number> = {};
-    results.forEach(([gid, c]) => { map[gid] = c; });
-    setUnreadCounts(prev => ({ ...prev, ...map }));
-  } catch {
-    // ignore; badge just won't show
+      const results = await Promise.all(pairs);
+      const map: Record<string, number> = {};
+      results.forEach(([gid, c]) => { map[gid] = c; });
+      setUnreadCounts(prev => ({ ...prev, ...map }));
+    } catch {
+      // ignore; badge just won't show
+    }
   }
-}
+
+  async function markGroupRead(groupId: string) {
+    if (!me) return;
+    try {
+      // server-side cursor advance (no clock skew)
+      await supabase.rpc('mark_group_read', { p_group_id: groupId });
+      // optimistic UI clear
+      setUnreadCounts((prev) => ({ ...prev, [groupId]: 0 }));
+      // also clear stored notifications tied to this group
+      await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('user_id', me)
+        .eq('payload->>group_id', groupId)
+        .eq('is_read', false);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[markGroupRead]', e);
+    }
+  }
 
 
 
@@ -448,40 +507,52 @@ const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
       <ul className="divide-y divide-black/5">
         {groups.map((g) => (
           <li key={g.id} className="group py-1 first:pt-0 last:pb-0">
-            <Link
-              to={`/group/${g.id}`}
-              className="block rounded-lg px-2 py-2 hover:bg-black/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
-            >
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 select-none items-center justify-center rounded-full border border-black/10 bg-neutral-100 text-sm font-semibold text-neutral-700">
-                  {(g.title || g.game || 'G').slice(0,1).toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <div className="truncate text-base font-medium text-neutral-900">{g.title ?? 'Untitled group'}</div>
-                    {g.host_id === me && (
-                      <span className="shrink-0 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">Host</span>
-                    )}
-                    {openPolls[g.id] && (
-                      <span className="shrink-0 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">Voting</span>
-                    )}
+            <div className="flex items-center">
+              <Link
+                to={`/group/${g.id}`}
+                onClick={() => setUnreadCounts(prev => ({ ...prev, [g.id]: 0 }))}
+                className="block flex-1 rounded-lg px-2 py-2 hover:bg-black/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 select-none items-center justify-center rounded-full border border-black/10 bg-neutral-100 text-sm font-semibold text-neutral-700">
+                    {(g.title || g.game || 'G').slice(0,1).toUpperCase()}
                   </div>
-                  <div className="mt-0.5 line-clamp-1 text-xs text-neutral-600">{g.description ?? 'No description'}</div>
-                  <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-neutral-700">
-                    {g.category && <span className="rounded-full border border-black/10 bg-neutral-50 px-2 py-0.5">#{g.category}</span>}
-                    {g.game && <span className="rounded-full border border-black/10 bg-neutral-50 px-2 py-0.5">{g.game}</span>}
-                    {g.city && <span className="rounded-full border border-black/10 bg-neutral-50 px-2 py-0.5">{g.city}</span>}
-                    {g.capacity && <span className="rounded-full border border-black/10 bg-neutral-50 px-2 py-0.5">{g.capacity} slots</span>}
-                    {g.created_at && <span className="rounded-full border border-black/10 bg-neutral-50 px-2 py-0.5">{fmtDate(g.created_at)}</span>}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <div className="truncate text-base font-medium text-neutral-900">{g.title ?? 'Untitled group'}</div>
+                      {g.host_id === me && (
+                        <span className="shrink-0 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">Host</span>
+                      )}
+                      {openPolls[g.id] && (
+                        <span className="shrink-0 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">Voting</span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 line-clamp-1 text-xs text-neutral-600">{g.description ?? 'No description'}</div>
+                    <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-neutral-700">
+                      {g.category && <span className="rounded-full border border-black/10 bg-neutral-50 px-2 py-0.5">#{g.category}</span>}
+                      {g.game && <span className="rounded-full border border-black/10 bg-neutral-50 px-2 py-0.5">{g.game}</span>}
+                      {g.city && <span className="rounded-full border border-black/10 bg-neutral-50 px-2 py-0.5">{g.city}</span>}
+                      {g.capacity && <span className="rounded-full border border-black/10 bg-neutral-50 px-2 py-0.5">{g.capacity} slots</span>}
+                      {g.created_at && <span className="rounded-full border border-black/10 bg-neutral-50 px-2 py-0.5">{fmtDate(g.created_at)}</span>}
+                    </div>
                   </div>
+                  {typeof unreadCounts[g.id] === 'number' && unreadCounts[g.id]! > 0 && (
+                    <span className="ml-1 inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-emerald-600 px-1 text-xs font-semibold text-white">
+                      {unreadCounts[g.id] > 99 ? '99+' : unreadCounts[g.id]}
+                    </span>
+                  )}
                 </div>
-                {unreadCounts[g.id] > 0 && (
-                  <span className="ml-1 inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-emerald-600 px-1 text-xs font-semibold text-white">
-                    {unreadCounts[g.id] > 99 ? '99+' : unreadCounts[g.id]}
-                  </span>
-                )}
-              </div>
-            </Link>
+              </Link>
+              {typeof unreadCounts[g.id] === 'number' && unreadCounts[g.id]! > 0 && (
+                <button
+                  onClick={(ev) => { ev.preventDefault(); ev.stopPropagation(); markGroupRead(g.id); }}
+                  className="ml-2 shrink-0 rounded-md border border-black/10 bg-white px-2.5 py-1 text-xs hover:bg-black/[0.04]"
+                  title="Mark as read"
+                >
+                  Read
+                </button>
+              )}
+            </div>
           </li>
         ))}
       </ul>
