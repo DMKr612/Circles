@@ -667,13 +667,28 @@ async function onAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
 async function logout() {
   try {
     await supabase.auth.signOut();
-    localStorage.removeItem("onboardingSeen");
-      window.location.href = `${window.location.origin}/onboarding`;
-    } catch (error) {
-      console.error("Logout failed:", error);
-      window.location.href = `${window.location.origin}/onboarding`;
+  } catch {}
+
+  // Clear local app flags
+  try {
+    localStorage.removeItem('onboardingSeen');
+    sessionStorage.clear();
+  } catch {}
+
+  // iOS/Android PWAs sometimes ignore SPA navigate after async tasks.
+  // Always do a hard redirect to the app base so it works on mobile.
+  const base = `${window.location.origin}${import.meta.env.BASE_URL}`;
+
+  // Best-effort: unregister service workers to avoid stale caches keeping old UI
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
     }
-  }
+  } catch {}
+
+  window.location.replace(base);
+}
   // Load friend profiles via RPC (uses auth.uid() on the server)
 useEffect(() => {
   (async () => {
