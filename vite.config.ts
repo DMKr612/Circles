@@ -43,7 +43,7 @@ export default defineConfig({
       }
     })
   ],
-  base: '/circles/',
+  base: '/Circles/',
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
