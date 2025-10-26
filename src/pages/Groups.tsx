@@ -28,10 +28,10 @@ export default function GroupsPage() {
   const query = useQuery();
 
   // querystring filters
-  const category = query.get("category") || "";   // e.g. "Games" or leaf like "Hokm"
-  const search = query.get("q") || "";            // text search
-  const modeJoined = query.get("joined") === "1";  // /groups?joined=1
-  const modeCreated = query.get("created") === "1"; // /groups?created=1
+  const category = query.get("category") || "";   // kept only for optional text filtering
+  const search = query.get("q") || "";            // kept only for optional text filtering
+  const modeJoined = true;   // this page = MY GROUPS
+  const modeCreated = true;  // include groups I host
   const HIGH_LEVEL = new Set(["games", "study", "outdoors"]);
 
   const [me, setMe] = useState<string | null>(null);
@@ -137,19 +137,19 @@ const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
         if (HIGH_LEVEL.has(catLower)) {
           const ids = allowedByCat[catLower] ?? [];
           if (ids.length > 0) {
-            const inList = ids.map((s) => `"${s}"`).join(",");
+            const inList = ids.join(","); // slugs only (no quotes)
             queryBuilder = queryBuilder.or(`game.in.(${inList}),category.eq.${catLower}`);
           } else {
             queryBuilder = queryBuilder.eq("category", catLower);
           }
         } else {
           const leaf = catLower.replace(/[^a-z0-9]+/g, "");
-          queryBuilder = queryBuilder.or(`game.eq.${leaf},game.ilike.%${catLower}%,title.ilike.%${catLower}%`);
+          queryBuilder = queryBuilder.or(`game.eq.${leaf},game.ilike.*${catLower}*,title.ilike.*${catLower}*`);
         }
       }
       if (search.trim()) {
         const q = search.trim();
-        queryBuilder = queryBuilder.or(`title.ilike.%${q}%,game.ilike.%${q}%`);
+        queryBuilder = queryBuilder.or(`title.ilike.*${q}*,game.ilike.*${q}*`);
       }
       return queryBuilder;
     };
@@ -179,45 +179,40 @@ const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
         const from = (reset ? 0 : (page + 1) * PAGE_SIZE) + 0; // next page start
         const to = from + PAGE_SIZE - 1;
 
-        if (modeCreated && me) {
+        if (!me) {
+          setGroups([]);
+          setErr("Please sign in to view your groups.");
+          setLoading(false);
+          setPaging(false);
+          return;
+        }
+
+        // Fetch my joined group ids and created group ids in parallel
+        const [joinedRes, createdRes] = await Promise.all([
+          supabase.from('group_members').select('group_id').eq('user_id', me),
+          supabase.from('groups').select('id').eq('host_id', me),
+        ]);
+        if (joinedRes.error) throw joinedRes.error;
+        if (createdRes.error) throw createdRes.error;
+        const joinedIds: string[] = (joinedRes.data ?? []).map((m: any) => m.group_id);
+        const createdIds: string[] = (createdRes.data ?? []).map((g: any) => g.id);
+
+        // Union of ids
+        const idSet = new Set<string>([...joinedIds, ...createdIds]);
+        const allIds = Array.from(idSet);
+
+        if (allIds.length > 0) {
           let q = supabase
             .from("groups")
             .select("id, title, description, city, capacity, category, game, created_at, host_id")
-            .eq("host_id", me)
+            .in("id", allIds)
             .order("created_at", { ascending: false })
             .range(from, to);
           const { data, error } = await applyCommonFilters(q);
           if (error) throw error;
           rows = (data ?? []) as GroupRow[];
-        } else if (modeJoined && me) {
-          const { data: mem, error: memErr } = await supabase
-            .from("group_members")
-            .select("group_id")
-            .eq("user_id", me);
-          if (memErr) throw memErr;
-          const ids = (mem ?? []).map((m: any) => m.group_id);
-          if (ids.length > 0) {
-            let q = supabase
-              .from("groups")
-              .select("id, title, description, city, capacity, category, game, created_at, host_id")
-              .in("id", ids)
-              .order("created_at", { ascending: false })
-              .range(from, to);
-            const { data, error } = await applyCommonFilters(q);
-            if (error) throw error;
-            rows = (data ?? []) as GroupRow[];
-          } else {
-            rows = [];
-          }
         } else {
-          let q = supabase
-            .from("groups")
-            .select("id, title, description, city, capacity, category, game, created_at, host_id")
-            .order("created_at", { ascending: false })
-            .range(from, to);
-          const { data, error } = await applyCommonFilters(q);
-          if (error) throw error;
-          rows = (data ?? []) as GroupRow[];
+          rows = [];
         }
 
         if (!mounted) return;
@@ -352,107 +347,90 @@ const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
 
 
   async function loadMore() {
-  try {
-    setPaging(true);
-    const from = (page + 1) * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
-    let rows: GroupRow[] = [];
+    try {
+      setPaging(true);
+      const from = (page + 1) * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      let rows: GroupRow[] = [];
 
-    const apply = (qb: any) => {
-      let b = qb;
-      const catLower = category ? category.toLowerCase() : '';
-      const HIGH_LEVEL = new Set(['games','study','outdoors']);
-      if (catLower) {
-        if (HIGH_LEVEL.has(catLower)) {
-          const ids = allowedByCat[catLower] ?? [];
-          if (ids.length > 0) {
-            const inList = ids.map((s) => `"${s}"`).join(',');
-            b = b.or(`game.in.(${inList}),category.eq.${catLower}`);
+      const apply = (qb: any) => {
+        let b = qb;
+        const catLower = category ? category.toLowerCase() : '';
+        const HIGH_LEVEL = new Set(['games','study','outdoors']);
+        if (catLower) {
+          if (HIGH_LEVEL.has(catLower)) {
+            const ids = allowedByCat[catLower] ?? [];
+            if (ids.length > 0) {
+              const inList = ids.join(','); // no quotes
+              b = b.or(`game.in.(${inList}),category.eq.${catLower}`);
+            } else {
+              b = b.eq('category', catLower);
+            }
           } else {
-            b = b.eq('category', catLower);
+            const leaf = catLower.replace(/[^a-z0-9]+/g, '');
+            b = b.or(`game.eq.${leaf},game.ilike.*${catLower}*,title.ilike.*${catLower}*`);
           }
-        } else {
-          const leaf = catLower.replace(/[^a-z0-9]+/g, '');
-          b = b.or(`game.eq.${leaf},game.ilike.%${catLower}%,title.ilike.%${catLower}%`);
         }
-      }
-      if (search.trim()) {
-        const q = search.trim();
-        b = b.or(`title.ilike.%${q}%,game.ilike.%${q}%`);
-      }
-      return b;
-    };
+        if (search.trim()) {
+          const q = search.trim();
+          b = b.or(`title.ilike.*${q}*,game.ilike.*${q}*`);
+        }
+        return b;
+      };
 
-    if (modeCreated && me) {
-      let q = supabase
-        .from('groups')
-        .select('id, title, description, city, capacity, category, game, created_at, host_id')
-        .eq('host_id', me)
-        .order('created_at', { ascending: false })
-        .range(from, to);
-      const { data, error } = await apply(q);
-      if (error) throw error;
-      rows = (data ?? []) as GroupRow[];
-    } else if (modeJoined && me) {
-      const { data: mem, error: memErr } = await supabase
-        .from('group_members')
-        .select('group_id')
-        .eq('user_id', me);
-      if (memErr) throw memErr;
-      const ids = (mem ?? []).map((m: any) => m.group_id);
-      if (ids.length > 0) {
+      if (!me) {
+        setPaging(false);
+        return;
+      }
+
+      // Fetch my joined group ids and created group ids in parallel
+      const [joinedRes, createdRes] = await Promise.all([
+        supabase.from('group_members').select('group_id').eq('user_id', me),
+        supabase.from('groups').select('id').eq('host_id', me),
+      ]);
+      if (joinedRes.error) throw joinedRes.error;
+      if (createdRes.error) throw createdRes.error;
+      const joinedIds: string[] = (joinedRes.data ?? []).map((m: any) => m.group_id);
+      const createdIds: string[] = (createdRes.data ?? []).map((g: any) => g.id);
+
+      const idSet = new Set<string>([...joinedIds, ...createdIds]);
+      const allIds = Array.from(idSet);
+
+      if (allIds.length > 0) {
         let q = supabase
           .from('groups')
           .select('id, title, description, city, capacity, category, game, created_at, host_id')
-          .in('id', ids)
+          .in('id', allIds)
           .order('created_at', { ascending: false })
           .range(from, to);
         const { data, error } = await apply(q);
         if (error) throw error;
         rows = (data ?? []) as GroupRow[];
-      } else {
-        rows = [];
       }
-    } else {
-      let q = supabase
-        .from('groups')
-        .select('id, title, description, city, capacity, category, game, created_at, host_id')
-        .order('created_at', { ascending: false })
-        .range(from, to);
-      const { data, error } = await apply(q);
-      if (error) throw error;
-      rows = (data ?? []) as GroupRow[];
-    }
 
-    setGroups(prev => [...prev, ...rows]);
-    setPage(p => p + 1);
-    setHasMore(rows.length === PAGE_SIZE);
+      setGroups(prev => [...prev, ...rows]);
+      setPage(p => p + 1);
+      setHasMore(rows.length === PAGE_SIZE);
 
-    const ids = rows.map((g: GroupRow) => g.id);
-    if (ids.length) {
-      const { data: polls } = await supabase
-        .from('group_polls')
-        .select('group_id')
-        .in('group_id', ids)
-        .eq('status', 'open');
-      const map: Record<string, boolean> = {};
-      (polls ?? []).forEach((p: any) => { map[p.group_id] = true; });
-      setOpenPolls(prev => ({ ...prev, ...map }));
+      const ids = rows.map((g: GroupRow) => g.id);
+      if (ids.length) {
+        const { data: polls } = await supabase
+          .from('group_polls')
+          .select('group_id')
+          .in('group_id', ids)
+          .eq('status', 'open');
+        const map: Record<string, boolean> = {};
+        (polls ?? []).forEach((p: any) => { map[p.group_id] = true; });
+        setOpenPolls(prev => ({ ...prev, ...map }));
+      }
+    } catch {
+      // ignore
+    } finally {
+      setPaging(false);
     }
-  } catch {
-    // ignore
-  } finally {
-    setPaging(false);
   }
-}
 
-  const pageTitle = modeCreated
-    ? "My Groups – Created"
-    : modeJoined
-    ? "My Groups – Joined"
-    : category
-    ? `Groups • ${category}`
-    : "All Groups";
+  const pageTitle = "My Groups";
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-8">
@@ -523,9 +501,6 @@ const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
                       {g.host_id === me && (
                         <span className="shrink-0 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">Host</span>
                       )}
-                      {openPolls[g.id] && (
-                        <span className="shrink-0 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">Voting</span>
-                      )}
                     </div>
                     <div className="mt-0.5 line-clamp-1 text-xs text-neutral-600">{g.description ?? 'No description'}</div>
                     <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-neutral-700">
@@ -536,11 +511,26 @@ const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
                       {g.created_at && <span className="rounded-full border border-black/10 bg-neutral-50 px-2 py-0.5">{fmtDate(g.created_at)}</span>}
                     </div>
                   </div>
-                  {typeof unreadCounts[g.id] === 'number' && unreadCounts[g.id]! > 0 && (
-                    <span className="ml-1 inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-emerald-600 px-1 text-xs font-semibold text-white">
-                      {unreadCounts[g.id] > 99 ? '99+' : unreadCounts[g.id]}
-                    </span>
-                  )}
+                  <div className="ml-1 flex items-center gap-1">
+  {openPolls[g.id] && (
+    <span
+      className="inline-flex h-6 items-center justify-center rounded-full bg-blue-600 px-2 text-xs font-semibold text-white"
+      title="Open voting"
+      aria-label="Open voting"
+    >
+      Vote
+    </span>
+  )}
+  {typeof unreadCounts[g.id] === 'number' && unreadCounts[g.id]! > 0 && (
+    <span
+      className="inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-emerald-600 px-1 text-xs font-semibold text-white"
+      title={`${unreadCounts[g.id]} new messages`}
+      aria-label={`${unreadCounts[g.id]} new messages`}
+    >
+      {unreadCounts[g.id] > 99 ? '99+' : unreadCounts[g.id]}
+    </span>
+  )}
+</div>
                 </div>
               </Link>
               {typeof unreadCounts[g.id] === 'number' && unreadCounts[g.id]! > 0 && (

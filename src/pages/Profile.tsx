@@ -1,13 +1,26 @@
-import React, { useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useState, useRef, useCallback, useDeferredValue } from "react";
+// @ts-ignore: package ships without TS types in this setup
+import { City } from 'country-state-city';
 import { supabase } from "@/lib/supabase";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useLocation } from "react-router-dom";
-import { useToast } from '@/components/Toaster';
+
+// Demo stubs for toast calls (prevents red lines if Toaster is removed)
+const success = (m?: string) => console.log("[ok]", m || "");
+const error   = (m?: string) => console.error("[err]", m || "");
+
+// Small sessionStorage helpers
+function ssGet<T = any>(k: string, fallback: T): T {
+  try { const v = sessionStorage.getItem(k); return v ? JSON.parse(v) as T : fallback; } catch { return fallback; }
+}
+function ssSet(k: string, v: any) {
+  try { sessionStorage.setItem(k, JSON.stringify(v)); } catch {}
+}
 
 
 
 // Types
-type PreviewGroup = { id: string; title: string; game: string | null; category: string | null };
+type PreviewGroup = { id: string; title: string; game: string | null; category: string | null; code?: string | null };
 type Thread = {
   other_id: string;
   name: string;
@@ -19,13 +32,47 @@ type Thread = {
 };
 type GameStat = { game: string; count: number };
 
+const __agoCache = new Map<string, string>();
 function timeAgo(iso: string) {
+  const prev = __agoCache.get(iso);
+  const now = Date.now();
+  if (prev) return prev;
   const d = new Date(iso);
-  const diff = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (diff < 60) return `${diff}s`;
-  const m = Math.floor(diff / 60); if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60); if (h < 24) return `${h}h`;
-  const days = Math.floor(h / 24); return `${days}d`;
+  const diff = Math.floor((now - d.getTime()) / 1000);
+  const res =
+    diff < 60 ? `${diff}s` :
+    diff < 3600 ? `${Math.floor(diff / 60)}m` :
+    diff < 86400 ? `${Math.floor(diff / 3600)}h` :
+    `${Math.floor(diff / 86400)}d`;
+  __agoCache.set(iso, res);
+  return res;
+}
+function normalizeCity(s: string): string {
+  try {
+    return s.normalize('NFKD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
+  } catch {
+    return (s || '').toLowerCase().trim();
+  }
+}
+
+const propsShallowEqual = (a: any, b: any) => {
+  const ka = Object.keys(a); const kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (let k of ka) { if (a[k] !== b[k]) return false; }
+  return true;
+};
+
+function renderGroupCode(id: string, serverCode?: string | null): string {
+  const sc = (serverCode ?? '').toString().trim();
+  if (sc) return sc.toUpperCase();
+  // Fallback: legacy local code (kept only to avoid blank UI if DB code is missing)
+  let h = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h += (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24);
+  }
+  const u = (h >>> 0).toString(16).toUpperCase();
+  return u.padStart(8, '0').slice(-8);
 }
 type GroupInvite = {
   group_id: string;
@@ -42,9 +89,13 @@ type GroupMsgNotif = {
 };
 
 export default function Profile() {
+  // UI containers used by effects below must be declared before usage
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const sidebarRef = useRef<HTMLDivElement | null>(null);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const notifRef = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const { success, error } = useToast();
   const { userId: routeUserId } = useParams<{ userId?: string }>();
   useLayoutEffect(() => {
     if (location.hash === "#chat") {
@@ -78,6 +129,17 @@ export default function Profile() {
   const [settingsMsg, setSettingsMsg] = useState<string | null>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
+
+  // All German cities from country-state-city, deduped + sorted
+  const deCities = useMemo<string[]>(() => {
+    try {
+      const all = (City.getCitiesOfCountry('DE') || []) as Array<{ name: string }>;
+      const names = all.map(c => (c?.name || '').trim()).filter(Boolean);
+      return Array.from(new Set(names)).sort((a,b)=>a.localeCompare(b));
+    } catch {
+      return [];
+    }
+  }, []);
 
   // Stats
   const [groupsCreated, setGroupsCreated] = useState<number>(0);
@@ -127,12 +189,8 @@ const [groupNotifs, setGroupNotifs] = useState<GroupMsgNotif[]>([]);
   const dmEndRef = useRef<HTMLDivElement | null>(null);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [threadQuery, setThreadQuery] = useState("");
+  const threadQueryDeferred = useDeferredValue(threadQuery);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  // Sidebar open/close + notifications popover
-const [sidebarOpen, setSidebarOpen] = useState(false);
-const sidebarRef = useRef<HTMLDivElement | null>(null);
-const [notifOpen, setNotifOpen] = useState(false);
-const notifRef = useRef<HTMLDivElement | null>(null);
 
 
   // Friends + requests
@@ -206,6 +264,8 @@ const notifRef = useRef<HTMLDivElement | null>(null);
   const [rateBusy, setRateBusy] = useState(false);
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const [myLastRatedAt, setMyLastRatedAt] = useState<string | null>(null);
+  const [pairNextAllowedAt, setPairNextAllowedAt] = useState<string | null>(null);
+  const [pairEditUsed, setPairEditUsed] = useState<boolean>(false);
   const [viewFriendStatus, setViewFriendStatus] =
     useState<'none'|'pending_in'|'pending_out'|'accepted'|'blocked'>('none');
 const headerName        = viewingOther ? (viewName || (routeUserId ? routeUserId.slice(0,6) : '')) : (name || email || '');
@@ -224,17 +284,43 @@ function fmtCooldown(secs: number): string {
 }
 
 const cooldownSecs = useMemo(() => {
-  if (!myLastRatedAt) return 0;
-  const last = new Date(myLastRatedAt).getTime();
-  const since = Math.floor((Date.now() - last) / 1000);
-  const limit = 7 * 24 * 3600;
-  return Math.max(0, limit - since);
-}, [myLastRatedAt]);
+  if (!pairNextAllowedAt) return 0;
+  const t = new Date(pairNextAllowedAt).getTime();
+  return Math.max(0, Math.floor((t - Date.now()) / 1000));
+}, [pairNextAllowedAt]);
+
+const canEditOnce = useMemo(() => {
+  if (!pairNextAllowedAt) return false;
+  const t = new Date(pairNextAllowedAt).getTime();
+  return t > Date.now() && !pairEditUsed;
+}, [pairNextAllowedAt, pairEditUsed]);
 
 const canRate = useMemo(
-  () => viewAllowRatings && !rateBusy && cooldownSecs === 0,
-  [viewAllowRatings, rateBusy, cooldownSecs]
+  () => viewAllowRatings && !rateBusy && (cooldownSecs === 0 || canEditOnce),
+  [viewAllowRatings, rateBusy, cooldownSecs, canEditOnce]
 );
+// Loader for pair status from rating_pairs
+type PairStatus = {
+  stars: number | null;
+  updated_at: string | null;
+  next_allowed_at: string | null;
+  edit_used: boolean;
+};
+
+async function loadPairStatus(otherId: string) {
+  if (!uid || !otherId) return;
+  const { data, error } = await supabase
+    .from('rating_pairs')
+    .select('stars,updated_at,next_allowed_at,edit_used')
+    .eq('rater_id', uid)
+    .eq('ratee_id', otherId)
+    .maybeSingle();
+  if (error) return;
+  setMyRating(Number(data?.stars ?? 0));
+  setMyLastRatedAt((data as any)?.updated_at ?? null);
+  setPairNextAllowedAt((data as any)?.next_allowed_at ?? null);
+  setPairEditUsed(Boolean((data as any)?.edit_used ?? false));
+}
 const headerInitials = (
   viewingOther
     ? (viewName || routeUserId || '?')
@@ -272,7 +358,7 @@ useEffect(() => {
   return () => document.removeEventListener('mousedown', onDown);
 }, [notifOpen, sidebarOpen]);
 
-  async function openThread(otherId: string) {
+  const openThread = useCallback(async (otherId: string) => {
     if (!uid) return;
     setShowSuggestions(false);
     setDmError(null);
@@ -289,7 +375,7 @@ useEffect(() => {
       .limit(200);
     setDmMsgs(msgs ?? []);
     setDmLoading(false);
-  }
+  }, [uid]);
 
   async function refreshFriendData(userId: string) {
     const { data: fr } = await supabase
@@ -378,17 +464,8 @@ useEffect(() => {
     setViewRatingAvg(Number((prof as any)?.rating_avg ?? 0));
     setViewRatingCount(Number((prof as any)?.rating_count ?? 0));
 
-    // Prefill my existing rating for this user
-    try {
-      const { data: myr } = await supabase
-  .from('ratings')
-  .select('stars,updated_at')
-  .eq('rater_id', uid!)
-  .eq('ratee_id', otherId)
-  .maybeSingle();
-setMyRating(Number((myr as any)?.stars ?? 0));
-setMyLastRatedAt((myr as any)?.updated_at ?? null);
-    } catch {}
+    // Prefill my existing rating + window status from the new model
+    await loadPairStatus(otherId);
 
     const { data: rel } = await supabase
       .from("friendships")
@@ -410,47 +487,61 @@ setMyLastRatedAt((myr as any)?.updated_at ?? null);
   }
 
   async function sendFriendRequest(targetId: string) {
-    await supabase.rpc("request_friend", { target_id: targetId });
-    if (uid) await refreshFriendData(uid);
-    setViewFriendStatus('pending_out');
+    try {
+      const { error: rpcErr } = await supabase.rpc("request_friend", { target_id: targetId });
+      if (rpcErr) throw rpcErr;
+      if (uid) await refreshFriendData(uid);
+      setViewFriendStatus('pending_out');
+      success('Friend request sent');
+    } catch (e: any) {
+      const msg = e?.message || 'Could not send friend request';
+      error(msg);
+    }
   }
 
   async function acceptFriend(fromId: string) {
-    await supabase.rpc("accept_friend", { from_id: fromId });
-    if (uid) await refreshFriendData(uid);
-    if (viewUserId === fromId) setViewFriendStatus('accepted');
+    try {
+      const { error: rpcErr } = await supabase.rpc("accept_friend", { from_id: fromId });
+      if (rpcErr) throw rpcErr;
+      if (uid) await refreshFriendData(uid);
+      if (viewUserId === fromId) setViewFriendStatus('accepted');
+      success('Friend request accepted');
+    } catch (e: any) {
+      const msg = e?.message || 'Could not accept friend request';
+      error(msg);
+    }
   }
 
   async function removeFriend(otherId: string) {
-    await supabase.rpc("remove_friend", { other_id: otherId });
-    if (uid) await refreshFriendData(uid);
-    if (viewUserId === otherId) setViewFriendStatus('none');
+    try {
+      const { error: rpcErr } = await supabase.rpc("remove_friend", { other_id: otherId });
+      if (rpcErr) throw rpcErr;
+      if (uid) await refreshFriendData(uid);
+      if (viewUserId === otherId) setViewFriendStatus('none');
+      success('Removed');
+    } catch (e: any) {
+      const msg = e?.message || 'Could not remove friend';
+      error(msg);
+    }
   }
 
-// Rate another user (0–6 stars) with 7-day cooldown
+// Rate another user (1–6 stars) with a 14‑day window and one allowed edit inside the window
 async function rateUser(n: number) {
   if (!uid || !viewUserId || rateBusy) return;
-  if (cooldownSecs > 0) return;
+  // Only allow if we are outside the window OR have the one-time edit available
+  if (!(cooldownSecs === 0 || canEditOnce)) return;
 
-  const v = Math.max(0, Math.min(6, Math.round(n)));
+  const v = Math.max(1, Math.min(6, Math.round(n))); // clamp to 1..6 (no 'clear' in the new model)
   setRateBusy(true);
 
   const prev = myRating;
   setMyRating(v);
   try {
-    if (v === 0) {
-      await supabase.from('ratings')
-        .delete()
-        .eq('rater_id', uid)
-        .eq('ratee_id', viewUserId);
-      setMyLastRatedAt(null);
-    } else {
-      const { error } = await supabase.from('ratings')
-        .upsert({ rater_id: uid, ratee_id: viewUserId, stars: v }, { onConflict: 'rater_id,ratee_id' });
-      if (error) throw error;
-      setMyLastRatedAt(new Date().toISOString());
-    }
+    const { error: rpcErr } = await supabase.rpc('submit_rating', { p_ratee: viewUserId, p_stars: v });
+    if (rpcErr) throw rpcErr;
 
+    // Reload pair status and aggregates
+    await loadPairStatus(viewUserId);
     const { data: agg } = await supabase
       .from('profiles')
       .select('rating_avg,rating_count')
@@ -463,31 +554,35 @@ async function rateUser(n: number) {
   } catch (e: any) {
     setMyRating(prev);
     const msg = String(e?.message || '');
-    if (/(7\\s*days|week|rate_weekly_limit)/i.test(msg)) {
-      setErr('You can rate this user once every 7 days.');
+    if (/rate_cooldown_active/i.test(msg)) {
+      setErr('You already used your one edit for this 14‑day window.');
+    } else if (/invalid_stars/i.test(msg)) {
+      setErr('Rating must be between 1 and 6.');
+    } else if (/not_authenticated/i.test(msg)) {
+      setErr('Please sign in to rate.');
     } else {
-      setErr(msg || 'Rating failed.');
+      setErr('Rating failed.');
     }
   } finally {
     setRateBusy(false);
   }
 }
-  async function acceptGroupInvite(gid: string) {
-  if (!uid) return;
-  // Prefer simple update; if RLS blocks, fallback to delete+insert
-  const { error } = await supabase
-    .from("group_members")
-    .update({ status: "active" })
-    .eq("group_id", gid)
-    .eq("user_id", uid);
-  if (error) {
-    try {
-      await supabase.from("group_members").delete().eq("group_id", gid).eq("user_id", uid);
-      await supabase.from("group_members").insert({ group_id: gid, user_id: uid, status: "active", role: "member" });
-    } catch {}
-  }
-  await refreshGroupSignals(uid);
-}
+  const acceptGroupInvite = useCallback(async (gid: string) => {
+    if (!uid) return;
+    // Prefer simple update; if RLS blocks, fallback to delete+insert
+    const { error } = await supabase
+      .from("group_members")
+      .update({ status: "active" })
+      .eq("group_id", gid)
+      .eq("user_id", uid);
+    if (error) {
+      try {
+        await supabase.from("group_members").delete().eq("group_id", gid).eq("user_id", uid);
+        await supabase.from("group_members").insert({ group_id: gid, user_id: uid, status: "active", role: "member" });
+      } catch {}
+    }
+    await refreshGroupSignals(uid);
+  }, [uid]);
 
 // Hydrate another user's profile WITHOUT opening the modal
 async function loadOtherProfile(otherId: string) {
@@ -505,17 +600,8 @@ async function loadOtherProfile(otherId: string) {
   setViewRatingAvg(Number((prof as any)?.rating_avg ?? 0));
   setViewRatingCount(Number((prof as any)?.rating_count ?? 0));
 
-  // Prefill my existing rating for this user
-  try {
-    const { data: myr } = await supabase
-  .from('ratings')
-  .select('stars,updated_at')
-  .eq('rater_id', uid!)
-  .eq('ratee_id', otherId)
-  .maybeSingle();
-setMyRating(Number((myr as any)?.stars ?? 0));
-setMyLastRatedAt((myr as any)?.updated_at ?? null);
-  } catch {}
+  // Prefill my existing rating + window status from the new model
+  await loadPairStatus(otherId);
 
   // Friend relation (for inline status/buttons)
   const { data: rel } = await supabase
@@ -538,16 +624,17 @@ setMyLastRatedAt((myr as any)?.updated_at ?? null);
   // Make sure the popup never appears
   setViewOpen(false);
 }
-async function declineGroupInvite(gid: string) {
+const declineGroupInvite = useCallback(async (gid: string) => {
   if (!uid) return;
   await supabase.from("group_members").delete().eq("group_id", gid).eq("user_id", uid);
   await refreshGroupSignals(uid);
-}
-function openGroup(gid: string) {
+}, [uid]);
+
+const openGroup = useCallback((gid: string) => {
   setGroupNotifs(prev => prev.filter(n => n.group_id !== gid));
   setNotifOpen(false);
   navigate(`/group/${gid}`);
-}
+}, [navigate]);
 
   // Resolve display for current DM target
   const dmDisplay = useMemo(() => {
@@ -599,6 +686,7 @@ function deviceTZ(): string {
       // sanitize
       const name = sName.trim();
       const city = sCity.trim();
+      if (!city) { setSettingsMsg("Please choose a city."); setSettingsSaving(false); return; }
       const timezone = sTimezone.trim() || "UTC";
       const interests = sInterests.split(",").map(s => s.trim()).filter(Boolean);
 
@@ -609,6 +697,11 @@ function deviceTZ(): string {
 
       if (updateError) throw updateError;
       setName(name);
+      try {
+         localStorage.setItem('myCity', city);
+         localStorage.setItem('myCityNorm', normalizeCity(city));
+         window.dispatchEvent(new CustomEvent('my-city-changed', { detail: { city } }));
+      } catch {}
       setSettingsMsg("Saved.");
       success('Profile saved');
       localStorage.setItem('theme', sTheme);
@@ -728,6 +821,17 @@ setFriendProfiles(m);
       if (off) return;
       setUid(_uid); setEmail(_email);
 
+      // Pre-hydrate UI from session cache (instant paint)
+      const CK_CREATED = `profile:${_uid}:createdPreview`;
+      const CK_JOINED  = `profile:${_uid}:joinedPreview`;
+      const CK_THREADS = `profile:${_uid}:threads`;
+      const cachedCreated = ssGet<PreviewGroup[]>(CK_CREATED, []);
+      const cachedJoined  = ssGet<PreviewGroup[]>(CK_JOINED,  []);
+      const cachedThreads = ssGet<Thread[]>(CK_THREADS, []);
+      if (cachedCreated.length) setCreatedPreview(cachedCreated);
+      if (cachedJoined.length)  setJoinedPreview(cachedJoined);
+      if (cachedThreads.length) setThreads(cachedThreads);
+
       // ESSENTIAL: profile + counts in parallel
       const [profResp, createdCountResp, joinedCountResp] = await Promise.all([
         supabase
@@ -751,7 +855,16 @@ setFriendProfiles(m);
       if (!off) {
         const prof: any = profResp.data || {};
         setName(prof?.name ?? "");
-        setSCity(prof?.city ?? "");
+        const city0 = (prof?.city ?? "").trim();
+        setSCity(city0);
+        if (city0) {
+         try {
+            localStorage.setItem('myCity', city0);
+            localStorage.setItem('myCityNorm', normalizeCity(city0));
+             window.dispatchEvent(new CustomEvent('my-city-changed', { detail: { city: city0 } }));
+         } catch {}
+        }
+
         setSTimezone(prof?.timezone ?? "UTC");
         if (!prof?.timezone) setSTimezone(deviceTZ());
         const ints0 = Array.isArray(prof?.interests) ? (prof.interests as string[]) : [];
@@ -783,18 +896,31 @@ setFriendProfiles(m);
         const createdIds = Array.from(new Set((createdMemberships ?? []).map((r: any) => r.group_id))).filter(Boolean);
         let createdGroups: any[] = [];
         if (createdIds.length) {
-          const { data: cg } = await supabase
+          const { data: cg, error: cgErr } = await supabase
             .from("groups")
-            .select("id,title,game,category,created_at")
+            .select("id,title,game,category,created_at, code")
             .in("id", createdIds)
             .order("created_at", { ascending: false })
             .limit(20);
-          createdGroups = cg ?? [];
+
+          if (cgErr) {
+            // Fallback: some DBs may not have pgcrypto or allow expressions in SELECT
+            const { data: cg2 } = await supabase
+              .from("groups")
+              .select("id,title,game,category,created_at")
+              .in("id", createdIds)
+              .order("created_at", { ascending: false })
+              .limit(20);
+            createdGroups = cg2 ?? [];
+          } else {
+            createdGroups = cg ?? [];
+          }
         }
         if (!off) {
           const seenC = new Set<string>();
           const uniqueC = createdGroups.filter((g: any) => g?.id && !seenC.has(g.id) && seenC.add(g.id)).slice(0, 5);
           setCreatedPreview(uniqueC as PreviewGroup[]);
+          ssSet(CK_CREATED, uniqueC);
         }
 
         // joined preview (latest joined groups) — any active membership
@@ -809,18 +935,31 @@ setFriendProfiles(m);
         const joinedIds = Array.from(new Set((joinedMemberships ?? []).map((r: any) => r.group_id))).filter(Boolean);
         let joinedGroups: any[] = [];
         if (joinedIds.length) {
-          const { data: jg } = await supabase
+          const { data: jg, error: jgErr } = await supabase
             .from("groups")
-            .select("id,title,game,category,created_at")
+            .select("id,title,game,category,created_at, code")
             .in("id", joinedIds)
             .order("created_at", { ascending: false })
             .limit(20);
-          joinedGroups = jg ?? [];
+
+          if (jgErr) {
+            // Fallback without SQL expression
+            const { data: jg2 } = await supabase
+              .from("groups")
+              .select("id,title,game,category,created_at")
+              .in("id", joinedIds)
+              .order("created_at", { ascending: false })
+              .limit(20);
+            joinedGroups = jg2 ?? [];
+          } else {
+            joinedGroups = jg ?? [];
+          }
         }
         if (!off) {
           const seenJ = new Set<string>();
           const uniqueJ = joinedGroups.filter((g: any) => g?.id && !seenJ.has(g.id) && seenJ.add(g.id)).slice(0, 5);
           setJoinedPreview(uniqueJ as PreviewGroup[]);
+          ssSet(CK_JOINED, uniqueJ);
         }
 
         // games played: aggregate group_members by groups.game for this user
@@ -844,10 +983,10 @@ setFriendProfiles(m);
         // threads: latest 100 to reduce payload, then hydrate names
         const { data: recent } = await supabase
           .from("direct_messages")
-          .select("id,from_id,to_id,body,created_at")
+          .select("from_id,to_id,body,created_at")
           .or(`from_id.eq.${_uid},to_id.eq.${_uid}`)
           .order("created_at", { ascending: false })
-          .limit(100);
+          .limit(40);
         const map = new Map<string, { last_body: string; last_at: string; last_from_me: boolean }>();
         (recent ?? []).forEach((m: any) => {
           const other = m.from_id === _uid ? m.to_id : m.from_id;
@@ -880,6 +1019,7 @@ setFriendProfiles(m);
           };
         });
         if (!off) setThreads(threadList);
+        if (!off) ssSet(CK_THREADS, threadList);
 
         if (!off) await refreshFriendData(_uid);
         if (!off) await refreshGroupSignals(_uid);
@@ -967,24 +1107,16 @@ setFriendProfiles(m);
           </button>
         );
       })}
-      <button
-        type="button"
-        disabled={!viewAllowRatings || rateBusy}
-        onClick={() => rateUser(0)}
-        className={`ml-1 rounded border border-black/10 px-2 py-0.5 text-[11px] ${
-          (!viewAllowRatings || rateBusy)
-            ? 'opacity-40 cursor-not-allowed'
-            : 'hover:bg-black/[0.04]'
-        }`}
-        title={viewAllowRatings ? 'Clear my rating' : 'Ratings disabled'}
-      >
-        Clear
-      </button>
-      {!canRate && (
-  <span className="ml-1 text-[11px] text-neutral-500">
-    Next in {fmtCooldown(cooldownSecs)}
-  </span>
-)}
+      {(!canRate && !canEditOnce) && (
+        <span className="ml-1 text-[11px] text-neutral-500">
+          Next in {fmtCooldown(cooldownSecs)}
+        </span>
+      )}
+      {(canEditOnce) && (
+        <span className="ml-1 text-[11px] text-emerald-600">
+          One edit available in this window
+        </span>
+      )}
     </div>
   )}
 </div>
@@ -1030,6 +1162,28 @@ setFriendProfiles(m);
                                 </li>
                               );
                             })}
+                          </ul>
+                        )}
+                      </div>
+                      {/* Group invitations */}
+                      <div className="mb-2">
+                        <div className="mb-1 text-xs font-semibold text-neutral-700">Group invitations</div>
+                        {groupInvites.length === 0 ? (
+                          <div className="rounded-md border border-black/5 bg-neutral-50 px-2 py-2 text-xs text-neutral-600">No new invitations</div>
+                        ) : (
+                          <ul className="space-y-1">
+                            {groupInvites.slice(0, 5).map((gi) => (
+                              <li key={gi.group_id} className="flex items-center justify-between rounded-md border border-black/10 px-2 py-1.5">
+                                <div className="min-w-0 pr-2">
+                                  <div className="truncate text-sm text-neutral-800">{gi.group_title || gi.group_id.slice(0,6)}</div>
+                                  <div className="text-[11px] text-neutral-500">Status: {gi.status}</div>
+                                </div>
+                                <div className="shrink-0 flex items-center gap-2">
+                                  <button onClick={() => acceptGroupInvite(gi.group_id)} className="rounded-md bg-emerald-600 px-2 py-0.5 text-xs text-white">Accept</button>
+                                  <button onClick={() => declineGroupInvite(gi.group_id)} className="rounded-md border border-black/10 px-2 py-0.5 text-xs">Decline</button>
+                                </div>
+                              </li>
+                            ))}
                           </ul>
                         )}
                       </div>
@@ -1150,25 +1304,28 @@ setFriendProfiles(m);
                   id={gid}
                   title={g.title}
                   meta={[g.category || '–', g.game || ''].filter(Boolean).join(' · ')}
+                  code={(g as any)?.code ?? null}
                 />
               );
             })}
           </Card>
 
           <Card title="Friends" count={sidebarItems.length} empty="No friends yet.">
-            {sidebarItems.map((t) => (
-              <FriendRow
-                key={t.other_id}
-                _otherId={t.other_id}
-                name={t.name}
-                avatarUrl={t.avatar_url}
-                lastBody={t.last_body}
-                lastAt={t.last_at}
-                unread={t.unread}
-                onOpen={() => openThread(t.other_id)}
-            
-              />
-            ))}
+            {sidebarItems.map((t) => {
+              const handleOpen = () => openThread(t.other_id);
+              return (
+                <FriendRow
+                  key={t.other_id}
+                  _otherId={t.other_id}
+                  name={t.name}
+                  avatarUrl={t.avatar_url}
+                  lastBody={t.last_body}
+                  lastAt={t.last_at}
+                  unread={t.unread}
+                  onOpen={handleOpen}
+                />
+              );
+            })}
           </Card>
         </div>
         </section>
@@ -1213,7 +1370,7 @@ setFriendProfiles(m);
                   <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-md border border-black/10 bg-white shadow">
                     <ul>
                       {friendOptions
-                        .filter(o => o.name.toLowerCase().includes(threadQuery.toLowerCase()))
+                        .filter(o => o.name.toLowerCase().includes(threadQueryDeferred.toLowerCase()))
                         .slice(0, 8)
                         .map(o => (
                           <li key={o.id} className="flex items-center justify-between gap-2 px-2 py-2 hover:bg-black/[0.03]">
@@ -1245,7 +1402,7 @@ setFriendProfiles(m);
                             </div>
                           </li>
                         ))}
-                      {friendOptions.filter(o => o.name.toLowerCase().includes(threadQuery.toLowerCase())).length === 0 && (
+                      {friendOptions.filter(o => o.name.toLowerCase().includes(threadQueryDeferred.toLowerCase())).length === 0 && (
                         <li className="px-2 py-2 text-xs text-neutral-600">No matches</li>
                       )}
                     </ul>
@@ -1256,7 +1413,7 @@ setFriendProfiles(m);
               <div className="max-h-[70vh] overflow-y-auto">
                 <ul>
                   {sidebarItems
-                    .filter(t => t.name.toLowerCase().includes(threadQuery.toLowerCase()))
+                    .filter(t => t.name.toLowerCase().includes(threadQueryDeferred.toLowerCase()))
                     .map((t) => (
                       <li key={t.other_id} className="flex items-center justify-between gap-2 px-1 py-2 hover:bg-black/[0.03] rounded cursor-pointer" onClick={() => openThread(t.other_id)}>
                         <div className="flex items-center gap-3">
@@ -1448,8 +1605,18 @@ setFriendProfiles(m);
                 onChange={(e) => setSCity(e.target.value)}
                 onBlur={() => { if (!sTimezone || sTimezone === "UTC") setSTimezone(deviceTZ()); }}
                 className="w-full rounded-md border border-black/10 px-3 py-2 text-sm"
-                placeholder="City"
+                placeholder="Start typing… e.g., Berlin"
+                list="cities-de"
+                required
               />
+              <datalist id="cities-de">
+                {deCities.slice(0, 8000).map((c) => (
+                  <option key={c} value={c} />
+                ))}
+              </datalist>
+              <div className="mt-1 text-[11px] text-neutral-500">
+                Choose your city. This powers “My city” filters in Browse.
+              </div>
             </div>
 
             <div>
@@ -1640,7 +1807,7 @@ setFriendProfiles(m);
   );
 }
 
-function StatCard({ label, value, to, onClick }: { label: string; value: number; to?: string; onClick?: () => void }) {
+const StatCard = React.memo(function StatCard({ label, value, to, onClick }: { label: string; value: number; to?: string; onClick?: () => void }) {
   const inner = (
     <>
       <div className="text-sm text-neutral-600">{label}</div>
@@ -1659,9 +1826,9 @@ function StatCard({ label, value, to, onClick }: { label: string; value: number;
       {inner}
     </button>
   );
-}
+}, propsShallowEqual);
 
-function Card({ title, count, empty, children }: { title: string; count: number; empty: string; children: React.ReactNode }) {
+const Card = React.memo(function Card({ title, count, empty, children }: { title: string; count: number; empty: string; children: React.ReactNode }) {
   return (
     <div className="rounded-xl border border-black/10 bg-white p-4 shadow-sm">
       <div className="mb-2 flex items-center justify-between">
@@ -1677,10 +1844,10 @@ function Card({ title, count, empty, children }: { title: string; count: number;
       )}
     </div>
   );
-}
+}, propsShallowEqual);
 
-function Row({ id, title, meta }: { id: string; title: string; meta: string }) {
-  const shortHash = String(id).slice(0, 8).toUpperCase();
+const Row = React.memo(function Row({ id, title, meta, code }: { id: string; title: string; meta: string; code?: string | null }) {
+  const shortHash = renderGroupCode(String(id), code);
   return (
     <li className="flex items-center justify-between py-2">
       <div>
@@ -1691,9 +1858,9 @@ function Row({ id, title, meta }: { id: string; title: string; meta: string }) {
       <Link to={`/group/${id}`} className="text-sm text-emerald-700 hover:underline">Open</Link>
     </li>
   );
-}
+}, propsShallowEqual);
 
-function FriendRow({ _otherId, name, avatarUrl, lastBody, lastAt, unread, onOpen }: {
+const FriendRow = React.memo(function FriendRow({ _otherId, name, avatarUrl, lastBody, lastAt, unread, onOpen }: {
   _otherId: string;
   name: string;
   avatarUrl: string | null;
@@ -1718,11 +1885,11 @@ function FriendRow({ _otherId, name, avatarUrl, lastBody, lastAt, unread, onOpen
         </div>
       </div>
       <div className="flex items-center gap-3">
-               <span className="text-[10px] text-neutral-500">{timeAgo(lastAt)}</span>
+        <span className="text-[10px] text-neutral-500">{timeAgo(lastAt)}</span>
         {unread && <span className="h-2 w-2 rounded-full bg-emerald-600" />}
         <Link to={`/profile/${_otherId}`} className="text-sm text-neutral-700 hover:underline">View</Link>
         <button onClick={onOpen} className="text-sm text-emerald-700 hover:underline">Chat</button>
       </div>
     </li>
   );
-}
+}, propsShallowEqual);

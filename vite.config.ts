@@ -1,52 +1,37 @@
-import { defineConfig } from 'vite';
+// @ts-nocheck
+import { defineConfig } from 'vite';           // splitVendorChunkPlugin raus
 import react from '@vitejs/plugin-react';
-import path from 'path';
-import { VitePWA } from 'vite-plugin-pwa';
+import compression from 'vite-plugin-compression';
+import { fileURLToPath, URL } from 'node:url';
 
 export default defineConfig({
+  base: '/Circles/',
   plugins: [
     react(),
-    VitePWA({
-      registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'robots.txt', 'apple-touch-icon.png'],
-      manifest: {
-        name: 'Circles',
-        short_name: 'Circles',
-        description: 'Groups, friends, and game nights.',
-        start_url: '/?source=pwa',
-        display: 'standalone',
-        background_color: '#ffffff',
-        theme_color: '#10b981',
-        lang: 'en',
-        icons: [
-          { src: '/pwa-192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/pwa-512.png', sizes: '512x512', type: 'image/png' },
-          { src: '/pwa-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable any' }
-        ]
-      },
-      workbox: {
-        navigateFallback: '/index.html',
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        runtimeCaching: [
-          {
-            // @ts-expect-error `self` exists in the service worker runtime (Workbox)
-            urlPattern: ({ url }) => url.origin === self.location.origin,
-            handler: 'StaleWhileRevalidate',
-            options: { cacheName: 'app-shell' }
-          },
-          {
-            urlPattern: ({ url }) => url.hostname.endsWith('supabase.co'),
-            handler: 'NetworkFirst',
-            options: { cacheName: 'supabase', networkTimeoutSeconds: 8 }
-          }
-        ]
-      }
-    })
+    compression({ algorithm: 'brotliCompress' }),
+    compression({ algorithm: 'gzip' }),
+    // VitePWA(...), falls vorhanden, bleibt
   ],
-  base: '/Circles/',
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
+  optimizeDeps: {
+    include: ['country-state-city'],
+  },
+  build: {
+    sourcemap: false,
+    target: 'es2020',
+    cssCodeSplit: true,
+    chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          supabase: ['@supabase/supabase-js'],
+        },
+      },
     },
   },
 });

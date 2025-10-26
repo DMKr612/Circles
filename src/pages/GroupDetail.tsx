@@ -10,7 +10,7 @@ console.log('[SUPABASE]', import.meta.env?.VITE_SUPABASE_URL, String((import.met
  type Group = {
   id: string;
   host_id: string;
-  creator_id?: string | null;  // ← add this line
+  creator_id?: string | null;
   title: string;
   purpose: string | null; // description
   category: string | null;
@@ -19,6 +19,7 @@ console.log('[SUPABASE]', import.meta.env?.VITE_SUPABASE_URL, String((import.met
   is_online: boolean;
   online_link: string | null;
   location: string | null;
+  city: string | null;
   created_at: string;
   code?: string | null;
 };
@@ -601,6 +602,11 @@ return (
                   <span className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
                     {group!.category || "Uncategorized"}
                   </span>
+                  {group!.city && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
+                      {group!.city}
+                    </span>
+                  )}
                 </div>
                 <h1 className="truncate text-3xl font-bold tracking-tight text-neutral-900">{group!.title}</h1>
                 <div className="mt-1 text-xs text-neutral-500">Created {new Date(group!.created_at).toLocaleDateString()} • Host: {members.find(m => m.user_id === group!.host_id)?.name || group!.host_id.slice(0,6)}</div>
@@ -660,11 +666,16 @@ return (
                 <div>Capacity: <span className="font-medium text-neutral-900">{group!.capacity}</span></div>
                 <div>Visibility: <span className="font-medium text-neutral-900">{group!.visibility || "private"}</span></div>
                 <div>Format: <span className="font-medium text-neutral-900">{group!.is_online ? "Online" : "In person"}</span></div>
+
+                <div>City: <span className="font-medium text-neutral-900">{group!.city || "—"}</span></div>
+
                 {group!.is_online && group!.online_link && (
                   <div className="col-span-2 truncate">Link: <a className="text-emerald-600 hover:underline" href={group!.online_link ?? '#'} target="_blank" rel="noreferrer">{group!.online_link}</a></div>
                 )}
-                {!group!.is_online && group!.location && (
-                  <div className="col-span-2">Location: <span className="font-medium text-neutral-900">{group!.location}</span></div>
+                {!group!.is_online && (group!.location || group!.city) && (
+                  <div className="col-span-2">
+                    Location: <span className="font-medium text-neutral-900">{group!.location || group!.city}</span>
+                  </div>
                 )}
               </div>
             </div>

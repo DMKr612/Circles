@@ -60,10 +60,13 @@ export default function BrowsePage() {
   const [loading, setLoading] = useState(false);
   // Memoized detector for code typed into search box
   const codeFromQ = useMemo(() => {
-    const s = (q || "").trim();
-    // treat 6–12 alphanumeric as a possible group code
-    return /^[A-Za-z0-9]{6,12}$/.test(s) ? s.toUpperCase() : null;
-  }, [q]);
+  const s = (q || "").trim();
+  // allow dashes/spaces; normalize to A–Z0–9
+  const cleaned = s.replace(/[^A-Za-z0-9]/g, "");
+  // treat 6–16 chars as a possible invite code
+  return /^[A-Za-z0-9]{6,16}$/.test(cleaned) ? cleaned.toUpperCase() : null;
+}, [q]);
+
 const PAGE_SIZE = 12;
 const [page, setPage] = useState(0);
 const [hasMore, setHasMore] = useState(false);
@@ -90,7 +93,8 @@ const [err, setErr] = useState<string | null>(null);
     if (q) next.set("q", q); else next.delete("q");
     if (groupId) next.set("id", groupId); else next.delete("id");
     if (code) next.set("code", code); else next.delete("code");
-    if (!code && codeFromQ) next.set("code", codeFromQ); else if (!codeFromQ) next.delete("code");
+    if (!code && codeFromQ) next.set("code", (q || "").trim());
+    else if (!codeFromQ) next.delete("code");
     // only push an update if something actually changed
     if (next.toString() !== params.toString()) {
       setParams(next, { replace: true });
@@ -103,19 +107,59 @@ const [err, setErr] = useState<string | null>(null);
     async function load(reset: boolean) {
       try {
         if (code || codeFromQ) {
-          const needle = (code || codeFromQ)!;
-          const { data, error } = await supabase
-            .from("groups")
-            .select("id, title, description, city, category, game, created_at, code")
-            .ilike("code", needle)  // case-insensitive exact
-            .single();
-          if (error) throw error;
-          if (!mounted) return;
-          setGroups(data ? [data as GroupRow] : []);
-          setHasMore(false);
-          setErr(null);
-          return;
-        }
+  const raw = (code || codeFromQ)!;
+  const cleaned = raw.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  const looksUuid = /^[0-9a-fA-F-]{32,36}$/.test(raw);
+
+  // 1) exact code match (normalized)
+  const exact = await supabase
+    .from("groups")
+    .select("id, title, description, city, category, game, created_at, code")
+    .eq("code", cleaned)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (exact.error) throw exact.error;
+  if (mounted && exact.data) {
+    setGroups([exact.data as GroupRow]);
+    setHasMore(false);
+    setErr(null);
+    return;
+  }
+
+  // 2) fuzzy code search (case-insensitive, supports partial/dashed)
+  let fuzzyQuery = supabase
+    .from("groups")
+    .select("id, title, description, city, category, game, created_at, code")
+    .order("created_at", { ascending: false })
+    .limit(5)
+    .ilike("code", `%${cleaned}%`);
+
+  // 3) also try by id when the input looks like a UUID
+  if (looksUuid) {
+    const byId = await supabase
+      .from("groups")
+      .select("id, title, description, city, category, game, created_at, code")
+      .eq("id", raw)
+      .maybeSingle();
+    if (byId.error) throw byId.error;
+    if (mounted && byId.data) {
+      setGroups([byId.data as GroupRow]);
+      setHasMore(false);
+      setErr(null);
+      return;
+    }
+  }
+
+  const { data: fuzzyRows, error: fuzzyErr } = await fuzzyQuery;
+  if (fuzzyErr) throw fuzzyErr;
+  if (!mounted) return;
+  setGroups((fuzzyRows ?? []) as GroupRow[]);
+  setHasMore(false);
+  setErr(null);
+  return;
+}
         if (groupId) {
           const { data, error } = await supabase
             .from("groups")

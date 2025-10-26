@@ -19,8 +19,7 @@ import {
   useParams,
 } from "react-router-dom";
 import type { User } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabase";
-import { ToastProvider } from '@/components/Toaster';
+import { supabase } from "./lib/supabase";
 
 // Pages
 import BrowsePage from "./pages/Browse";
@@ -32,6 +31,20 @@ import GroupsByGame from "./pages/groups/GroupsByGame";
 import MyGroups from "./pages/groups/MyGroups";
 const Onboarding = lazy(() => import("./pages/Onboarding"));
 const JoinByCode = lazy(() => import("./pages/JoinByCode"));
+
+// ---- Route prefetch helpers (Step 1) ----
+const routePrefetchers: Record<string, () => void> = {
+  "/onboarding": () => { import("./pages/Onboarding"); },
+  "/browse":     () => { import("./pages/Browse"); },
+  "/profile":    () => { import("./pages/Profile"); },
+  "/create":     () => { import("./pages/CreateGroup"); },
+  "/groups":     () => { import("./pages/Groups"); },
+  "/groups/mine":() => { import("./pages/groups/MyGroups"); },
+};
+function prefetchRoute(path: string) {
+  try { routePrefetchers[path]?.(); } catch {}
+}
+// ---- End prefetch helpers ----
 
 /* =========================
    Auth (single source)
@@ -85,6 +98,7 @@ function HomeButton() {
     <div className="fixed fab-offset-top left-4 z-50">
       <Link
         to="/onboarding"
+        onMouseEnter={() => prefetchRoute("/onboarding")}
         className="flex items-center justify-center h-10 w-10 rounded-full border border-black/10 bg-white/90 text-xl shadow-md hover:bg-black/[0.04]"
         aria-label="Onboarding"
         title="Onboarding"
@@ -108,6 +122,7 @@ function FloatingNav() {
       <nav className="pointer-events-auto flex items-center gap-4 rounded-full border border-black/10 bg-white/90 backdrop-blur px-4 py-2 shadow-lg">
         <Link
           to="/browse"
+          onMouseEnter={() => prefetchRoute("/browse")}
           className="grid h-12 w-12 place-items-center rounded-full border border-black/10 hover:bg-black/[0.04]"
           aria-label="Browse"
           title="Browse"
@@ -116,6 +131,7 @@ function FloatingNav() {
         </Link>
         <Link
           to="/profile"
+          onMouseEnter={() => prefetchRoute("/profile")}
           className="grid h-12 w-12 place-items-center rounded-full border border-black/10 hover:bg-black/[0.04]"
           aria-label="Home"
           title="Home"
@@ -124,6 +140,7 @@ function FloatingNav() {
         </Link>
         <Link
           to="/create"
+          onMouseEnter={() => prefetchRoute("/create")}
           className="grid h-12 w-12 place-items-center rounded-full border border-black/10 hover:bg-black/[0.04]"
           aria-label="Create group"
           title="Create group"
@@ -211,7 +228,6 @@ export default function App() {
   return (
     <div id="page-root" className="min-h-dvh flow-root flex flex-col">
       <AuthProvider>
-        <ToastProvider>
           <HomeButton />
           <FloatingNav />
           <AppErrorBoundary>
@@ -250,7 +266,6 @@ export default function App() {
               </Routes>
             </Suspense>
           </AppErrorBoundary>
-        </ToastProvider>
       </AuthProvider>
     </div>
   );
