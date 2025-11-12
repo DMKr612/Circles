@@ -31,20 +31,17 @@ type Thread = {
 };
 type GameStat = { game: string; count: number };
 
-const __agoCache = new Map<string, string>();
 function timeAgo(iso: string) {
-  const prev = __agoCache.get(iso);
-  const now = Date.now();
-  if (prev) return prev;
+  if (!iso) return "—";
   const d = new Date(iso);
-  const diff = Math.floor((now - d.getTime()) / 1000);
-  const res =
-    diff < 60 ? `${diff}s` :
-    diff < 3600 ? `${Math.floor(diff / 60)}m` :
-    diff < 86400 ? `${Math.floor(diff / 3600)}h` :
-    `${Math.floor(diff / 86400)}d`;
-  __agoCache.set(iso, res);
-  return res;
+  if (isNaN(d.getTime())) return "—"; // invalid date
+  const diff = Math.floor((Date.now() - d.getTime()) / 1000);
+  // Hide unrealistic old timestamps
+  if (diff < 0 || diff > 86400 * 365 * 5) return "—";
+  if (diff < 60) return `${diff}s`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+  return `${Math.floor(diff / 86400)}d`;
 }
 function normalizeCity(s: string): string {
   try {
@@ -155,6 +152,7 @@ export default function Profile() {
   const [groupsJoined, setGroupsJoined] = useState<number>(0);
   const [joinedPreview, setJoinedPreview] = useState<PreviewGroup[]>([]);
   const [groupFilter, setGroupFilter] = useState<'created' | 'joined' | 'all'>('created');
+  const [showRequests, setShowRequests] = useState(false);
 
   // Games played stats
   const [gamesTotal, setGamesTotal] = useState<number>(0);
@@ -213,8 +211,41 @@ const [groupNotifs, setGroupNotifs] = useState<GroupMsgNotif[]>([]);
   const [incomingRequests, setIncomingRequests] = useState<FriendShipRow[]>([]);
   const [outgoingRequests, setOutgoingRequests] = useState<FriendShipRow[]>([]);
   // Profiles for accepted friends (used in right sidebar search)
-  const [friendProfiles, setFriendProfiles] =
-    useState<Map<string, { name: string; avatar_url: string | null }>>(new Map());
+  const [friendProfiles, setFriendProfiles] = useState<Map<string, any>>(new Map());
+
+  // Fetch names + ratings of users who sent friend requests, merge into cache
+  useEffect(() => {
+    if (!incomingRequests.length || !uid) return;
+
+    const others = incomingRequests.map((r) =>
+      r.user_id_a === uid ? r.user_id_b : r.user_id_a
+    );
+
+    supabase
+      .from("profiles")
+      .select("user_id, name, avatar_url, rating_avg, games_total")
+      .in("user_id", others)
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("Profile fetch error:", error);
+          return;
+        }
+        if (data && data.length) {
+          setFriendProfiles((prev) => {
+            const next = new Map(prev);
+            for (const p of data) {
+              next.set(p.user_id, {
+                name: p.name ?? "",
+                avatar_url: p.avatar_url ?? null,
+                rating_avg: p.rating_avg ?? 0,
+                games_total: p.games_total ?? 0,
+              });
+            }
+            return next;
+          });
+        }
+      });
+  }, [incomingRequests, uid]);
 
   // Merge DM threads with accepted friends for sidebar
   const sidebarItems = useMemo<Thread[]>(() => {
@@ -242,6 +273,38 @@ const [groupNotifs, setGroupNotifs] = useState<GroupMsgNotif[]>([]);
     out.sort((a, b) => (b.last_at > a.last_at ? 1 : (b.last_at < a.last_at ? -1 : 0)));
     return out;
   }, [threads, friends, friendProfiles, uid]);
+
+  // Fetch rating and game data for all friends in sidebarItems
+  useEffect(() => {
+    if (!sidebarItems.length) return;
+
+    const ids = sidebarItems.map((f) => f.other_id);
+    supabase
+      .from("profiles")
+      .select("user_id, name, avatar_url, rating_avg, rating_count, games_total")
+      .in("user_id", ids)
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("Profile fetch error (friends):", error);
+          return;
+        }
+        if (data && data.length) {
+          setFriendProfiles((prev) => {
+            const next = new Map(prev);
+            for (const p of data) {
+              next.set(p.user_id, {
+                name: p.name ?? "",
+                avatar_url: p.avatar_url ?? null,
+                rating_avg: p.rating_avg ?? 0,
+                rating_count: p.rating_count ?? 0,
+                games_total: p.games_total ?? 0,
+              });
+            }
+            return next;
+          });
+        }
+      });
+  }, [sidebarItems]);
 
   // Derived: unread threads and total notification count
   const unreadThreads = useMemo(() => threads.filter(t => !t.last_from_me), [threads]);
@@ -795,18 +858,27 @@ useEffect(() => {
   (async () => {
     if (!uid) { setFriendProfiles(new Map()); return; }
     const { data: fr } = await supabase
-  .from("friendships")
-  .select("user_id_a,user_id_b,status")
-  .or(`user_id_a.eq.${uid},user_id_b.eq.${uid}`)
-  .eq("status","accepted");
-const ids = new Set<string>();
-(fr ?? []).forEach(r => ids.add(r.user_id_a === uid ? r.user_id_b : r.user_id_a));
-let m = new Map<string, { name: string; avatar_url: string | null }>();
-if (ids.size) {
-  const { data: profs } = await supabase.from("profiles").select("user_id,name,avatar_url").in("user_id", [...ids]);
-  (profs ?? []).forEach((p:any) => m.set(p.user_id, { name: p.name ?? "", avatar_url: p.avatar_url ?? null }));
-}
-setFriendProfiles(m);
+      .from("friendships")
+      .select("user_id_a,user_id_b,status")
+      .or(`user_id_a.eq.${uid},user_id_b.eq.${uid}`)
+      .eq("status", "accepted");
+    const ids = new Set<string>();
+    (fr ?? []).forEach(r => ids.add(r.user_id_a === uid ? r.user_id_b : r.user_id_a));
+    let m = new Map<string, any>();
+    if (ids.size) {
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("user_id,name,avatar_url,rating_avg,rating_count,games_total")
+        .in("user_id", [...ids]);
+      (profs ?? []).forEach((p: any) => m.set(p.user_id, {
+        name: p.name ?? "",
+        avatar_url: p.avatar_url ?? null,
+        rating_avg: p.rating_avg ?? 0,
+        rating_count: p.rating_count ?? 0,
+        games_total: p.games_total ?? 0,
+      }));
+    }
+    setFriendProfiles(m);
   })();
 }, [uid, friends.length]);
 
@@ -1073,61 +1145,67 @@ setFriendProfiles(m);
           <div className="text-lg font-semibold text-neutral-900">{headerName}</div>
           {!viewingOther && <div className="text-sm text-neutral-600">{email}</div>}
           <div className="mt-1 flex items-center gap-3 text-sm text-neutral-700">
-  {/* Average stars (0–6) + total count */}
-  <span
-    title={`${headerRatingAvg.toFixed(1)} / 6 from ${headerRatingCount} ratings`}
-    className="inline-flex items-center gap-1"
-  >
-    {Array.from({ length: 6 }).map((_, i) => (
-      <span key={i}>
-        {i < Math.round(headerRatingAvg || 0) ? '★' : '☆'}
-      </span>
-    ))}
-    <span className="ml-1 text-xs text-neutral-500">
-      ({headerRatingCount || 0})
-    </span>
-  </span>
+            {/* Average stars (0–6) + total count */}
+            <span
+              title={`${headerRatingAvg.toFixed(1)} / 6 from ${headerRatingCount} ratings`}
+              className="inline-flex items-center gap-1"
+            >
+              {Array.from({ length: 6 }).map((_, i) => (
+                <span
+                  key={i}
+                  className={i < Math.round(headerRatingAvg || 0) ? 'text-emerald-500' : 'text-neutral-400'}
+                >
+                  ★
+                </span>
+              ))}
+              <span className="ml-2 text-sm text-neutral-700 font-medium">
+                {headerRatingAvg.toFixed(1)} / 6
+              </span>
+              <span className="ml-1 text-xs text-neutral-500">
+                ({headerRatingCount} {headerRatingCount === 1 ? 'person' : 'people'})
+              </span>
+            </span>
 
-  {/* Interactive rater for viewing other profiles */}
-  {viewingOther && (
-    <div className="ml-2 inline-flex items-center gap-2">
-      <span className="text-xs text-neutral-500">Rate:</span>
-      {Array.from({ length: 6 }).map((_, idx) => {
-        const n = idx + 1; // 1..6
-        const active = (hoverRating ?? myRating) >= n;
-        return (
-          <button
-            key={n}
-            type="button"
-            disabled={!viewAllowRatings || rateBusy}
-            onMouseEnter={() => setHoverRating(n)}
-            onMouseLeave={() => setHoverRating(null)}
-            onClick={() => rateUser(n)}
-            className={`text-lg leading-none ${
-              (!viewAllowRatings || rateBusy)
-                ? 'opacity-40 cursor-not-allowed'
-                : 'hover:scale-110 transition-transform'
-            } ${active ? 'text-emerald-600' : 'text-neutral-400'}`}
-            aria-label={`Give ${n} star${n > 1 ? 's' : ''}`}
-            title={viewAllowRatings ? `${n} / 6` : 'Ratings disabled'}
-          >
-            {active ? '★' : '☆'}
-          </button>
-        );
-      })}
-      {(!canRate && !canEditOnce) && (
-        <span className="ml-1 text-[11px] text-neutral-500">
-          Next in {fmtCooldown(cooldownSecs)}
-        </span>
-      )}
-      {(canEditOnce) && (
-        <span className="ml-1 text-[11px] text-emerald-600">
-          One edit available in this window
-        </span>
-      )}
-    </div>
-  )}
-</div>
+            {/* Interactive rater for viewing other profiles */}
+            {viewingOther && (
+              <div className="ml-2 inline-flex items-center gap-2">
+                <span className="text-xs text-neutral-500">Rate:</span>
+                {Array.from({ length: 6 }).map((_, idx) => {
+                  const n = idx + 1; // 1..6
+                  const active = (hoverRating ?? myRating) >= n;
+                  return (
+                    <button
+                      key={n}
+                      type="button"
+                      disabled={!viewAllowRatings || rateBusy}
+                      onMouseEnter={() => setHoverRating(n)}
+                      onMouseLeave={() => setHoverRating(null)}
+                      onClick={() => rateUser(n)}
+                      className={`text-lg leading-none ${
+                        (!viewAllowRatings || rateBusy)
+                          ? 'opacity-40 cursor-not-allowed'
+                          : 'hover:scale-110 transition-transform'
+                      } ${active ? 'text-emerald-600' : 'text-neutral-400'}`}
+                      aria-label={`Give ${n} star${n > 1 ? 's' : ''}`}
+                      title={viewAllowRatings ? `${n} / 6` : 'Ratings disabled'}
+                    >
+                      {active ? '★' : '☆'}
+                    </button>
+                  );
+                })}
+                {(!canRate && !canEditOnce) && (
+                  <span className="ml-1 text-[11px] text-neutral-500">
+                    Next in {fmtCooldown(cooldownSecs)}
+                  </span>
+                )}
+                {(canEditOnce) && (
+                  <span className="ml-1 text-[11px] text-emerald-600">
+                    One edit available in this window
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
 
           {!viewingOther && (
             <div className="mt-2 flex items-center gap-2">
@@ -1159,7 +1237,7 @@ setFriendProfiles(m);
                           <ul className="space-y-1">
                             {incomingRequests.slice(0, 5).map(r => {
                               const other = r.user_id_a === uid ? r.user_id_b : r.user_id_a;
-                              const nm = friendProfiles.get(other)?.name || other.slice(0,6);
+                              const nm = friendProfiles.get(other)?.name || "A new user";
                               return (
                                 <li key={r.id} className="flex items-center justify-between rounded-md border border-black/10 px-2 py-1.5">
                                   <span className="truncate text-sm text-neutral-800">{nm}</span>
@@ -1233,38 +1311,7 @@ setFriendProfiles(m);
         <StatCard label="Groups Created" value={groupsCreated} to="/browse?created=1" />
         <StatCard label="Games Played" value={gamesTotal} onClick={() => setGamesModalOpen(true)} />
       </div>
-            {incomingRequests.length > 0 && (
-        <div className="rounded-xl border border-black/10 bg-white p-4 shadow-sm">
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-base font-medium text-neutral-900">Friend Requests</h3>
-            <span className="text-xs text-neutral-600">{incomingRequests.length}</span>
-          </div>
-          <ul className="divide-y">
-            {incomingRequests.map((r) => {
-              const other = r.user_id_a === uid ? r.user_id_b : r.user_id_a;
-              return (
-                <li key={r.id} className="flex items-center justify-between py-2">
-                  <div className="text-sm text-neutral-800">{other}</div>
-                  <div className="flex items-center gap-2">
-                <button
-                  onClick={() => acceptFriend(other)}
-                  className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm text-white"
-                >
-                  Accept
-                </button>
-                <button
-                  onClick={() => removeFriend(other)}
-                  className="rounded-md border border-black/10 bg-white px-3 py-1.5 text-sm"
-                >
-                  Decline
-                </button>
-              </div>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
+      {/* Removed Friend Requests block above Groups + Friends side-by-side */}
 
       {/* Groups + Friends side-by-side */}
       <section className="mt-8 space-y-3">
@@ -1318,22 +1365,111 @@ setFriendProfiles(m);
             })}
           </Card>
 
-          <Card title="Friends" count={sidebarItems.length} empty="No friends yet.">
-            {sidebarItems.map((t) => {
-              const handleOpen = () => openThread(t.other_id);
-              return (
-                <FriendRow
-                  key={t.other_id}
-                  _otherId={t.other_id}
-                  name={t.name}
-                  avatarUrl={t.avatar_url}
-                  lastBody={t.last_body}
-                  lastAt={t.last_at}
-                  unread={t.unread}
-                  onOpen={handleOpen}
-                />
-              );
-            })}
+          <Card title="" count={showRequests ? incomingRequests.length : sidebarItems.length} empty={showRequests ? "No friend requests." : "No friends yet."}>
+            <div className="mb-2 flex justify-center">
+              <div className="inline-flex rounded-full bg-neutral-100 p-0.5 shadow-sm">
+                <button
+                  onClick={() => setShowRequests(false)}
+                  className={`px-4 py-1.5 text-sm font-medium rounded-full transition-colors duration-150 ${
+                    !showRequests
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'text-neutral-700 hover:bg-neutral-200'
+                  }`}
+                >
+                  Friends
+                </button>
+                <button
+                  onClick={() => setShowRequests(true)}
+                  className={`px-4 py-1.5 text-sm font-medium rounded-full transition-colors duration-150 ${
+                    showRequests
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'text-neutral-700 hover:bg-neutral-200'
+                  }`}
+                >
+                  Friend Requests
+                </button>
+              </div>
+            </div>
+
+            {!showRequests ? (
+              sidebarItems.map((t) => {
+                const handleOpen = () => openThread(t.other_id);
+                const profile = friendProfiles.get(t.other_id);
+                const avgStars = profile?.rating_avg ? Math.round(profile.rating_avg) : 0;
+                const gamesPlayed = profile?.games_total ?? 0;
+                const ratingCount = profile?.rating_count ?? 0;
+                return (
+                  <li key={t.other_id} className="flex items-center justify-between py-2">
+                    <div className="flex items-center gap-3">
+                      <div className="h-8 w-8 rounded-full bg-neutral-200 grid place-items-center text-xs font-medium overflow-hidden">
+                        {t.avatar_url ? (
+                          <img src={t.avatar_url} alt="" className="h-8 w-8 rounded-full object-cover" />
+                        ) : (
+                          t.name.slice(0,2).toUpperCase()
+                        )}
+                      </div>
+                      <div>
+                        <div className="font-medium text-neutral-900">{t.name}</div>
+                        <div className="text-xs text-neutral-600 flex items-center gap-2">
+                          <span className="flex items-center">
+                            {Array.from({ length: 6 }).map((_, i) => (
+                              <span
+                                key={i}
+                                className={i < avgStars ? 'text-emerald-500' : 'text-neutral-400'}
+                              >
+                                ★
+                              </span>
+                            ))}
+                            <span className="ml-1 text-[11px] text-neutral-500">
+                              {profile?.rating_avg?.toFixed(1) || "0.0"}/6
+                            </span>
+                            <span className="ml-1 text-[11px] text-neutral-500">
+                              ({ratingCount})
+                            </span>
+                          </span>
+                          <span className="text-[11px] text-neutral-500">
+                            {gamesPlayed} games
+                          </span>
+                        </div>
+                        <div className="text-xs text-neutral-600 truncate max-w-[160px]">
+                          {t.last_from_me ? "You: " : ""}
+                          {t.last_body}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-neutral-500">{timeAgo(t.last_at)}</span>
+                      <button onClick={() => navigate(`/profile/${t.other_id}`)} className="text-xs text-neutral-700 hover:underline">View</button>
+                      <button onClick={handleOpen} className="text-xs text-emerald-600 hover:underline">Chat</button>
+                    </div>
+                  </li>
+                );
+              })
+            ) : (
+              incomingRequests.map((r) => {
+                const other = r.user_id_a === uid ? r.user_id_b : r.user_id_a;
+                const nm = friendProfiles.get(other)?.name || other.slice(0, 6);
+                return (
+                  <li key={r.id} className="flex items-center justify-between py-2">
+                    <div className="text-sm text-neutral-800">{nm}</div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => acceptFriend(other)}
+                        className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm text-white"
+                      >
+                        Accept
+                      </button>
+                      <button
+                        onClick={() => removeFriend(other)}
+                        className="rounded-md border border-black/10 bg-white px-3 py-1.5 text-sm"
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  </li>
+                );
+              })
+            )}
           </Card>
         </div>
         </section>
