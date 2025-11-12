@@ -41,7 +41,16 @@ const randomName = (file: File) => {
   return `${id}_${file.name}`;
 };
 
-export default function ChatPanel({ groupId, pageSize = 30, user }: Props) {
+type ChatPanelProps = {
+  groupId: string;
+  pageSize?: number;
+  user?: any;
+  onClose: () => void;
+  full: boolean;
+  setFull: (v: boolean) => void;
+};
+
+export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full, setFull }: ChatPanelProps) {
   // base state
   const [me, setMe] = useState<string | null>(null);
   const [myProfile, setMyProfile] = useState<Profile | null>(null);

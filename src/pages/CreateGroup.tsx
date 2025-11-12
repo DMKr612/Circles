@@ -5,29 +5,14 @@ import { useNavigate, Link } from "react-router-dom";
 // map for quick lookups when rendering selected chips
 const EMPTY_ARR: string[] = [];
 
-import { State, City } from 'country-state-city';
+// City list state and loader will be defined in component below
 
-// Build German city list dynamically (no flatMap to avoid lib target issues)
-const DE_CITIES: string[] = (() => {
-  const states = (State.getStatesOfCountry('DE') || []) as Array<{ isoCode: string; name: string }>;
-  const names: string[] = [];
-  for (const s of states) {
-    const cities = (City.getCitiesOfState('DE', s.isoCode) || []) as Array<{ name: string }>;
-    for (const c of cities) {
-      if (c && typeof c.name === 'string' && c.name.trim()) {
-        names.push(c.name.trim());
-      }
-    }
-  }
-  return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b, 'de'));
-})();
-
-function suggestCity(input: string): string | null {
+function suggestCity(input: string, cityList: string[]): string | null {
   const q = input.trim().toLowerCase();
   if (!q) return null;
-  const exact = DE_CITIES.find(n => n.toLowerCase() === q);
+  const exact = cityList.find(n => n.toLowerCase() === q);
   if (exact) return exact;
-  return DE_CITIES.find(n => n.toLowerCase().startsWith(q)) ?? null;
+  return cityList.find(n => n.toLowerCase().startsWith(q)) ?? null;
 }
 
 type Cat = { name: string };
@@ -35,6 +20,28 @@ type Opt = { id: string; label: string; category: string };
 type Friend = { id: string; display_name: string | null; avatar_url: string | null };
 
 export default function CreateGroupPage() {
+  // German cities state and loader
+  const [deCities, setDeCities] = useState<string[]>([]);
+  const [citiesLoaded, setCitiesLoaded] = useState<boolean>(false);
+  // Load German cities dynamically (only once)
+  const loadCities = async () => {
+    if (citiesLoaded || deCities.length > 0) return;
+    // Dynamically import only when needed
+    const { State, City } = await import('country-state-city');
+    const states = (State.getStatesOfCountry('DE') || []) as Array<{ isoCode: string; name: string }>;
+    const names: string[] = [];
+    for (const s of states) {
+      const cities = (City.getCitiesOfState('DE', s.isoCode) || []) as Array<{ name: string }>;
+      for (const c of cities) {
+        if (c && typeof c.name === 'string' && c.name.trim()) {
+          names.push(c.name.trim());
+        }
+      }
+    }
+    const unique = Array.from(new Set(names)).sort((a, b) => a.localeCompare(b, 'de'));
+    setDeCities(unique);
+    setCitiesLoaded(true);
+  };
   const navigate = useNavigate();
   const presetCategory = "Games";
   const presetGame = "";
@@ -158,15 +165,15 @@ async function refreshFriendData(userId: string) {
   const [description, setDescription] = useState("");
   const [city, setCity] = useState("");
   const [cityTouched, setCityTouched] = useState(false);
-  const cityCanonical = useMemo(() => suggestCity(city), [city]);
+  const cityCanonical = useMemo(() => suggestCity(city, deCities), [city, deCities]);
   const cityValid = !!cityCanonical;
   const [cityOpen, setCityOpen] = useState(false);
   const [cityIdx, setCityIdx] = useState<number>(-1);
   const filteredCities = useMemo(() => {
     const q = city.trim().toLowerCase();
-    if (!q) return DE_CITIES.slice(0, 8);
-    return DE_CITIES.filter(n => n.toLowerCase().includes(q)).slice(0, 8);
-  }, [city]);
+    if (!q) return deCities.slice(0, 8);
+    return deCities.filter(n => n.toLowerCase().includes(q)).slice(0, 8);
+  }, [city, deCities]);
   const [capacity, setCapacity] = useState<number>(3);
 
   const [catOpen, setCatOpen] = useState(false);
@@ -426,7 +433,7 @@ async function refreshFriendData(userId: string) {
               <input
                 value={city}
                 onChange={(e) => { setCity(e.target.value); setCityOpen(true); setCityIdx(-1); }}
-                onFocus={() => setCityOpen(true)}
+                onFocus={async () => { await loadCities(); setCityOpen(true); }}
                 onBlur={() => { setTimeout(() => setCityOpen(false), 120); setCityTouched(true); }}
                 onKeyDown={(e) => {
                   if (!cityOpen) return;

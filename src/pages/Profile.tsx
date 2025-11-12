@@ -1,6 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useState, useRef, useCallback, useDeferredValue } from "react";
 // @ts-ignore: package ships without TS types in this setup
-import { City } from 'country-state-city';
 import { supabase } from "@/lib/supabase";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useLocation } from "react-router-dom";
@@ -130,16 +129,25 @@ export default function Profile() {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
 
-  // All German cities from country-state-city, deduped + sorted
-  const deCities = useMemo<string[]>(() => {
+  // German cities state, loaded on demand
+  const [deCities, setDeCities] = useState<string[]>([]);
+  const [citiesLoaded, setCitiesLoaded] = useState(false);
+
+  // Load German cities dynamically
+  const loadCities = useCallback(async () => {
+    if (citiesLoaded || deCities.length > 0) return;
     try {
+      const { City } = await import('country-state-city');
       const all = (City.getCitiesOfCountry('DE') || []) as Array<{ name: string }>;
       const names = all.map(c => (c?.name || '').trim()).filter(Boolean);
-      return Array.from(new Set(names)).sort((a,b)=>a.localeCompare(b));
+      const uniqueSorted = Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
+      setDeCities(uniqueSorted);
+      setCitiesLoaded(true);
     } catch {
-      return [];
+      setDeCities([]);
+      setCitiesLoaded(true);
     }
-  }, []);
+  }, [citiesLoaded, deCities.length]);
 
   // Stats
   const [groupsCreated, setGroupsCreated] = useState<number>(0);
@@ -1603,6 +1611,7 @@ setFriendProfiles(m);
               <input
                 value={sCity}
                 onChange={(e) => setSCity(e.target.value)}
+                onFocus={async () => { await loadCities(); }}
                 onBlur={() => { if (!sTimezone || sTimezone === "UTC") setSTimezone(deviceTZ()); }}
                 className="w-full rounded-md border border-black/10 px-3 py-2 text-sm"
                 placeholder="Start typing… e.g., Berlin"

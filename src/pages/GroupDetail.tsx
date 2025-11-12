@@ -1,11 +1,17 @@
-import { useEffect, useState, useRef, type FormEvent } from "react";
-import type React from "react";
+import { useEffect, useState, useRef, lazy, Suspense, type FormEvent } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 
 import { supabase } from "../lib/supabase";
 console.log('[SUPABASE]', import.meta.env?.VITE_SUPABASE_URL, String((import.meta.env?.VITE_SUPABASE_ANON_KEY||'')).slice(0,8));
 
 
+// --- Types ---
+type ChatPanelProps = {
+  groupId: string;
+  onClose: () => void;
+  full: boolean;
+  setFull: (v: boolean) => void;
+};
 // --- Types ---
  type Group = {
   id: string;
@@ -36,6 +42,8 @@ console.log('[SUPABASE]', import.meta.env?.VITE_SUPABASE_URL, String((import.met
 type Poll = { id: string; group_id: string; title: string; status: string; closes_at: string | null; created_by: string };
 type PollOption = { id: string; poll_id: string; label: string; starts_at: string | null; place: string | null };
 type Member = { user_id: string; role: string | null; name: string | null; created_at: string };
+
+const ChatPanel = lazy(() => import("../../components/ChatPanel"));
 
 export default function GroupDetail() {
   const { id = "" } = useParams<{ id: string }>();
@@ -743,13 +751,21 @@ return (
       </div>
     )}
 
-    {chatOpen && (
-     <ChatPanel
-        groupId={group!.id}
-        onClose={() => { setChatOpen(false); setChatFull(false); }}
-        full={chatFull}
-        setFull={setChatFull}
-      />
+    {chatOpen && group && (
+      <Suspense
+        fallback={
+          <div className="fixed inset-0 grid place-items-center bg-black/40 text-white">
+            Loading Chat...
+          </div>
+        }
+      >
+        <ChatPanel
+          groupId={group!.id}
+          onClose={() => { setChatOpen(false); setChatFull(false); }}
+          full={chatFull}
+          setFull={setChatFull}
+        />
+      </Suspense>
     )}
     {viewOpen && viewUserId && (
       <div className="fixed inset-0 z-50 grid place-items-center bg-black/40">
@@ -798,323 +814,4 @@ return (
     )}
   </>
 );
-}
-
-
-
-
-// --- Chat Panel (slide-in) ---
-function ChatPanel({ groupId, onClose, full, setFull }: { groupId: string; onClose: () => void; full: boolean; setFull: (v: boolean) => void }) {
-  // chat state
-  const [msgs, setMsgs] = useState<Message[]>([]);
-  const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const listRef = useRef<HTMLDivElement | null>(null);
-  const [profileMap, setProfileMap] = useState<Record<string, string | null>>({});
-  const [myId, setMyId] = useState<string | null>(null);
-  const [myName, setMyName] = useState<string>("");
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [typingUsers, setTypingUsers] = useState<Record<string, { name: string; ts: number }>>({});
-  const typingTimeoutRef = useRef<number | null>(null);
-
-  // keyset pagination state for chat history
-  const [oldestTs, setOldestTs] = useState<string | null>(null);
-  const [oldestId, setOldestId] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState<boolean>(true);
-  const [loadingMore, setLoadingMore] = useState<boolean>(false);
-  const PAGE_SIZE = 50;
-
-  // Load my id and my name
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.auth.getUser();
-      const uid = data.user?.id ?? null;
-      setMyId(uid);
-      if (uid) {
-        const { data: p } = await supabase.from('profiles').select('name').eq('user_id', uid).maybeSingle();
-        setMyName(p?.name || uid.slice(0,6));
-      }
-    })();
-  }, []);
-
-  // load history (latest first, then render ascending)
-  useEffect(() => {
-    let ignore = false;
-    setInitialLoading(true);
-    (async () => {
-      // fetch newest PAGE_SIZE messages with keyset-friendly ordering
-      const { data, error } = await supabase
-        .from("group_messages")
-        .select("id, group_id, user_id, content, created_at")
-        .eq("group_id", groupId)
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: false })
-        .limit(PAGE_SIZE);
-
-      if (error) { if (!ignore) { setErr(error.message); setInitialLoading(false); } return; }
-      if (ignore) { setInitialLoading(false); return; }
-
-      const desc = (data ?? []).map((m: any) => ({
-        id: m.id as string,
-        group_id: m.group_id as string,
-        user_id: m.user_id as string,
-        content: (m.content ?? "") as string,
-        created_at: m.created_at as string,
-      }));
-
-      // compute cursor from oldest item of this page (which is the last in desc list)
-      const oldest = desc[desc.length - 1] || null;
-      setOldestTs(oldest ? oldest.created_at : null);
-      setOldestId(oldest ? oldest.id : null);
-      setHasMore((desc.length === PAGE_SIZE));
-
-      // render ascending for UI
-      const asc = [...desc].reverse();
-      setMsgs(asc as Message[]);
-
-      // fetch distinct user names once
-      const uids = Array.from(new Set(asc.map(m => m.user_id)));
-      if (uids.length) {
-        const { data: profs } = await supabase
-          .from("profiles")
-          .select("user_id, name")
-          .in("user_id", uids);
-        const map: Record<string, string | null> = {};
-        (profs ?? []).forEach((p: any) => { map[p.user_id] = p.name ?? null; });
-        if (!ignore) setProfileMap(map);
-      }
-      setInitialLoading(false);
-    })();
-    return () => { ignore = true; };
-  }, [groupId]);
-
-  // fetch older pages
-  async function loadOlder() {
-    if (!hasMore || loadingMore || !oldestTs || !oldestId) return;
-    setLoadingMore(true);
-    setErr(null);
-
-    // keyset condition: created_at < cursor OR (created_at = cursor AND id < cursorId)
-    const { data, error } = await supabase
-      .from("group_messages")
-      .select("id, group_id, user_id, content, created_at")
-      .eq("group_id", groupId)
-      .or(`created_at.lt.${oldestTs},and(created_at.eq.${oldestTs},id.lt.${oldestId})`)
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: false })
-      .limit(PAGE_SIZE);
-
-    if (error) { setErr(error.message); setLoadingMore(false); return; }
-
-    const desc = (data ?? []).map((m: any) => ({
-      id: m.id as string,
-      group_id: m.group_id as string,
-      user_id: m.user_id as string,
-      content: (m.content ?? "") as string,
-      created_at: m.created_at as string,
-    }));
-
-    // update cursor from the new oldest item (last in desc)
-    const newOldest = desc[desc.length - 1] || null;
-    setOldestTs(newOldest ? newOldest.created_at : oldestTs);
-    setOldestId(newOldest ? newOldest.id : oldestId);
-    setHasMore(desc.length === PAGE_SIZE);
-
-    // prepend older messages (convert to ascending order before merge)
-    const asc = [...desc].reverse();
-    setMsgs(prev => [...asc, ...prev]);
-
-    setLoadingMore(false);
-  }
-
-  // realtime (messages + typing)
-  useEffect(() => {
-    const channel = supabase
-      .channel(`grp-msgs-${groupId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'group_messages', filter: `group_id=eq.${groupId}` }, (payload) => {
-        if (payload.eventType === 'INSERT') {
-          const m = payload.new as any;
-          setMsgs(prev => [...prev, { id: m.id, group_id: m.group_id, user_id: m.user_id, content: (m.content ?? ""), created_at: m.created_at }]);
-          // lazy-resolve name for new sender if missing
-          if (!profileMap[m.user_id]) {
-            supabase
-              .from("profiles")
-              .select("user_id, name")
-              .eq("user_id", m.user_id)
-              .maybeSingle()
-              .then(({ data }) => {
-                if (data) setProfileMap(prev => ({ ...prev, [data.user_id]: data.name ?? null }));
-              });
-          }
-        }
-        if (payload.eventType === 'DELETE') {
-          const m = payload.old as any;
-          setMsgs(prev => prev.filter(x => x.id !== m.id));
-        }
-        if (payload.eventType === 'UPDATE') {
-          const m = payload.new as any;
-          setMsgs(prev => prev.map(x => x.id === m.id ? { ...x, content: (m.content ?? "") } : x));
-        }
-      })
-      .on('broadcast', { event: 'typing' }, ({ payload }) => {
-        const { user_id, name } = payload as { user_id: string; name: string };
-        if (!user_id || user_id === myId) return;
-        setTypingUsers(prev => ({ ...prev, [user_id]: { name, ts: Date.now() } }));
-        // auto-expire after 3s
-        setTimeout(() => {
-          setTypingUsers(prev => {
-            const copy = { ...prev } as Record<string, { name: string; ts: number }>;
-            if (copy[user_id] && Date.now() - copy[user_id].ts > 2500) delete copy[user_id];
-            return copy;
-          });
-        }, 3000);
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [groupId, myId, profileMap]);
-
-  // autoscroll
-  useEffect(() => {
-  if (loadingMore) return;
-  listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
-}, [msgs.length, loadingMore]);
-
-  async function send(e: FormEvent) {
-    e.preventDefault();
-    const body = text.trim();
-    if (!body) return;
-    setSending(true);
-    setErr(null);
-    const user = (await supabase.auth.getUser()).data.user;
-    if (!user) { setErr("Please sign in"); setSending(false); return; }
-    const { error } = await supabase
-      .from('group_messages')
-      .insert({ group_id: groupId, user_id: user.id, content: body });
-    if (error) {
-      setErr(error.message);
-    } else {
-      setText("");
-    }
-    setSending(false);
-  }
-
-  return (
-    <>
-      {full && <div className="fixed inset-0 z-40 bg-black/50" onClick={onClose} />}
-
-      <div
-        className={
-          "fixed right-0 top-0 z-50 h-full transform transition-transform duration-300 " +
-          (full ? "w-screen translate-x-0" : "w-[min(92vw,520px)] translate-x-0")
-        }
-      >
-        <div className="flex h-full flex-col overflow-hidden rounded-none border-l border-black/10 bg-white shadow-xl">
-          {/* Header */}
-          <div className="flex items-center justify-between border-b border-black/10 bg-white px-3 py-2">
-            <div className="flex items-center gap-2">
-              <button onClick={onClose} className="rounded-md border border-black/10 px-2 py-1 text-sm">Close</button>
-              <div>
-                <div className="text-sm font-medium text-neutral-900">Group Chat</div>
-                <div className="text-[11px] text-neutral-500">Visible to all members</div>
-              </div>
-            </div>
-            <button onClick={() => setFull(!full)} className="rounded-md border border-black/10 px-2 py-1 text-sm">
-              {full ? "Exit Fullscreen" : "Fullscreen"}
-            </button>
-          </div>
-
-          {/* Messages */}
-          <div ref={listRef} className="flex-1 overflow-y-auto bg-neutral-50 px-3 py-3">
-            {/* Load older */}
-            {hasMore && !initialLoading && (
-              <div className="mb-2 flex justify-center">
-                <button
-                  onClick={loadOlder}
-                  disabled={loadingMore}
-                  className="rounded-md border border-black/10 bg-white px-3 py-1.5 text-xs hover:bg-black/5 disabled:opacity-60"
-                >
-                  {loadingMore ? 'Loading…' : 'Load older'}
-                </button>
-              </div>
-            )}
-            {msgs.map(m => {
-              const mine = myId && m.user_id === myId;
-              const name = profileMap[m.user_id] ?? m.user_id.slice(0,6);
-              return (
-                <div key={m.id} className={`mb-2 flex ${mine ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${mine ? 'bg-emerald-600 text-white' : 'bg-white border border-black/10'}`}>
-                    {!mine && <div className="mb-0.5 text-[11px] font-medium text-neutral-600">{name}</div>}
-                    <div className="whitespace-pre-wrap break-words">{m.content}</div>
-                    <div className={`mt-1 text-[10px] ${mine ? 'text-emerald-50/80' : 'text-neutral-500'}`}>{new Date(m.created_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</div>
-                  </div>
-                </div>
-              );
-            })}
-            {msgs.length === 0 && !initialLoading && (
-              <div className="text-center text-sm text-neutral-500">No messages yet.</div>
-            )}
-            {initialLoading && (
-              <div className="flex justify-center py-6 text-neutral-400">
-                <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                </svg>
-              </div>
-            )}
-          </div>
-
-          {/* Typing indicator */}
-          {Object.keys(typingUsers).length > 0 && (
-            <div className="px-3 py-1 text-[11px] text-neutral-500">
-              {Object.values(typingUsers).map(t => t.name).join(', ')} typing…
-            </div>
-          )}
-
-          {/* Composer */}
-          <form onSubmit={send} className="border-t border-black/10 bg-white px-3 py-2">
-            <div className="flex items-end gap-2">
-              <textarea
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                onInput={() => {
-                  if (!myId) return;
-                  // throttle to once per 800ms
-                  const now = Date.now();
-                  if (typingTimeoutRef.current && now - typingTimeoutRef.current < 800) return;
-                  typingTimeoutRef.current = now;
-                  supabase.channel(`grp-msgs-${groupId}`).send({ type: 'broadcast', event: 'typing', payload: { user_id: myId, name: myName } });
-                }}
-                placeholder="Type a message…"
-                rows={1}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    (e.currentTarget.form as HTMLFormElement)?.requestSubmit();
-                  }
-                }}
-                className="min-h-[40px] max-h-40 flex-1 resize-none rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-              <button
-                type="submit"
-                disabled={!text.trim() || sending || initialLoading}
-                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {(sending || initialLoading) ? (
-                  <span className="inline-flex items-center gap-2">
-                    <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a 8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                    </svg>
-                    Sending…
-                  </span>
-                ) : 'Send'}
-              </button>
-            </div>
-            {err && <div className="mt-1 text-xs text-red-600">{err}</div>}
-          </form>
-        </div>
-      </div>
-    </>
-  );
 }

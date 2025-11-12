@@ -1,6 +1,7 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, lazy, Suspense } from "react";
 import { createPortal } from "react-dom";
-import ChatPanel from "./ChatPanel";
+
+const ChatPanel = lazy(() => import("./ChatPanel"));
 
 type Props = {
   groupId: string;
@@ -68,7 +69,22 @@ export default function ChatPopup({ groupId, label = "Chat", user }: Props) {
                 </div>
                 {/* Chat body */}
                 <div className="h-[calc(100%-44px)]">
-                  <ChatPanel key={groupId} groupId={groupId} user={user} />
+                  <Suspense
+                    fallback={
+                      <div className="flex h-full w-full items-center justify-center text-neutral-500">
+                        Loading chat...
+                      </div>
+                    }
+                  >
+                    <ChatPanel
+                      key={groupId}
+                      groupId={groupId}
+                      user={user}
+                      onClose={() => setOpen(false)}
+                      full={true}
+                      setFull={() => {}}
+                    />
+                  </Suspense>
                 </div>
               </div>
             </div>
