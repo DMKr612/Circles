@@ -43,9 +43,6 @@ export const GAMES: Game[] = [
   { id: "kayak",   name: "Kayaking",    blurb: "Water adventures on rivers and lakes", tag: "Outdoors", online: 30, groups: 2, image: "🛶" },
 ];
 
-const GAME_MAP: Record<string, Game> = Object.fromEntries(
-  GAMES.map((g) => [g.id.toLowerCase(), g])
-);
 
 export default function BrowsePage() {
   const [params, setParams] = useSearchParams();
@@ -57,7 +54,9 @@ export default function BrowsePage() {
   );
 
   const [groups, setGroups] = useState<GroupRow[]>([]);
+  const [last6hOnly, setLast6hOnly] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
   // Memoized detector for code typed into search box
   const codeFromQ = useMemo(() => {
   const s = (q || "").trim();
@@ -202,6 +201,14 @@ const [err, setErr] = useState<string | null>(null);
           const s = q.trim();
           base = base.or(`title.ilike.%${s}%,game.ilike.%${s}%`);
         }
+        if (last6hOnly) {
+          const sinceIso = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+          base = supabase
+            .from("groups")
+            .select("id, title, description, city, category, game, created_at, code")
+            .gte("created_at", sinceIso)
+            .order("created_at", { ascending: false });
+        }
 
         const from = 0;
         const to = PAGE_SIZE - 1;
@@ -225,12 +232,13 @@ const [err, setErr] = useState<string | null>(null);
 
     load(true);
     return () => { mounted = false; };
-  }, [cat, q, allowedByCat, groupId, code, codeFromQ]);
+  }, [cat, q, allowedByCat, groupId, code, codeFromQ, last6hOnly, reloadTick]);
   async function loadMore() {
     if (paging || loading || !hasMore) return;
     if (groupId) return;
     if (code) return;
     if (codeFromQ) return;
+    if (last6hOnly) return;
     setPaging(true);
     try {
       let base = supabase
@@ -251,6 +259,14 @@ const [err, setErr] = useState<string | null>(null);
       if (q.trim()) {
         const s = q.trim();
         base = base.or(`title.ilike.%${s}%,game.ilike.%${s}%`);
+      }
+      if (last6hOnly) {
+        const sinceIso = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+        base = supabase
+          .from("groups")
+          .select("id, title, description, city, category, game, created_at, code")
+          .gte("created_at", sinceIso)
+          .order("created_at", { ascending: false });
       }
 
       const from = (page + 1) * PAGE_SIZE;
@@ -425,20 +441,20 @@ const [err, setErr] = useState<string | null>(null);
               ? "Group by Code"
               : groupId
                 ? "Group by ID"
-                : cat !== "All"
-                  ? `Groups in ${cat}`
-                  : q
-                    ? `Groups matching “${q}”`
-                    : "Latest Groups"}
+                : last6hOnly
+                  ? "Groups from last 6 hours"
+                  : cat !== "All"
+                    ? `Groups in ${cat}`
+                    : q
+                      ? `Groups matching “${q}”`
+                      : ""}
           </h2>
-          {((code || codeFromQ || groupId) ? false : (cat !== "All" || q)) && (
-            <button
-              onClick={() => { setCat("All"); setQ(""); }}
-              className="text-sm text-neutral-600 hover:text-neutral-800"
-            >
-              Clear filter
-            </button>
-          )}
+          <button
+            onClick={() => setReloadTick((t) => t + 1)}
+            className="text-sm text-neutral-600 hover:text-neutral-800"
+          >
+            Refresh
+          </button>
         </div>
 
         <div className="mt-4 rounded-xl border border-black/10 bg-white">
@@ -447,7 +463,24 @@ const [err, setErr] = useState<string | null>(null);
           ) : loading && groups.length === 0 ? (
             <div className="p-6 text-neutral-500">Loading…</div>
           ) : groups.length === 0 ? (
-            <div className="p-6 text-neutral-500">No groups found.</div>
+            last6hOnly ? (
+              <div className="p-6 text-center">
+                <div className="text-lg font-semibold text-neutral-900">No groups in the last 6 hours</div>
+                <div className="mt-1 text-sm text-neutral-600">
+                  This view only lists groups created since the last 6 hours (UTC).
+                </div>
+                <div className="mt-4 flex items-center justify-center gap-2">
+                  <button
+                    onClick={() => setReloadTick((t) => t + 1)}
+                    className="rounded-md border border-black/10 bg-white px-3 py-1.5 text-sm hover:bg-black/[0.04]"
+                  >
+                    Refresh
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-6 text-neutral-500">No groups found.</div>
+            )
           ) : (
             <>
               <ul>
@@ -462,16 +495,6 @@ const [err, setErr] = useState<string | null>(null);
                       <div className="flex items-center justify-between">
                         <div>
                           <div className="font-semibold text-neutral-900">{g.title}</div>
-                          <div className="text-sm text-neutral-600">{g.description}</div>
-                          <div className="text-xs text-neutral-400">
-                            {g.city && <span>{g.city} · </span>}
-                            {g.category && <span>{g.category}</span>}
-                            {g.code && (
-                              <span className="ml-2 rounded-full bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium text-neutral-600">
-                                Code: {String(g.code).toUpperCase()}
-                              </span>
-                            )}
-                          </div>
                         </div>
                         <Link
                           to={`/group/${gid}`}

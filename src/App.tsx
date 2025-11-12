@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   lazy,
   Suspense,
@@ -21,14 +22,14 @@ import {
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "./lib/supabase";
 
-// Pages
-import BrowsePage from "./pages/Browse";
-import CreateGroup from "./pages/CreateGroup";
-import GroupDetail from "./pages/GroupDetail";
-import Groups from "./pages/Groups";
-import Profile from "./pages/Profile";
-import GroupsByGame from "./pages/groups/GroupsByGame";
-import MyGroups from "./pages/groups/MyGroups";
+// Pages (lazy imports)
+const BrowsePage = lazy(() => import("./pages/Browse"));
+const CreateGroup = lazy(() => import("./pages/CreateGroup"));
+const GroupDetail = lazy(() => import("./pages/GroupDetail"));
+const Groups = lazy(() => import("./pages/Groups"));
+const Profile = lazy(() => import("./pages/Profile"));
+const GroupsByGame = lazy(() => import("./pages/groups/GroupsByGame"));
+const MyGroups = lazy(() => import("./pages/groups/MyGroups"));
 const Onboarding = lazy(() => import("./pages/Onboarding"));
 const JoinByCode = lazy(() => import("./pages/JoinByCode"));
 
@@ -85,7 +86,13 @@ function AuthProvider({ children }: PropsWithChildren) {
 function RequireAuth({ children }: PropsWithChildren): JSX.Element | null {
   const { user, loading } = useAuth();
   const loc = useLocation();
-  if (loading) return null;
+  if (loading) {
+    return (
+      <div className="grid min-h-dvh place-items-center text-sm text-neutral-600">
+        Loading…
+      </div>
+    );
+  }
   if (!user) return <Navigate to="/onboarding" replace state={{ from: loc.pathname }} />;
   return <>{children}</>;
 }
@@ -114,11 +121,32 @@ function FloatingNav() {
   const location = useLocation();
   const onOnboarding = location.pathname.startsWith("/onboarding");
 
+  // Dock visibility: show on scroll or when hovering the middle button; fade out after 3s
+  const [dockVisible, setDockVisible] = useState(false);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearHideTimer = () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current); };
+  const scheduleHide = (ms = 3000) => {
+    clearHideTimer();
+    hideTimerRef.current = setTimeout(() => setDockVisible(false), ms);
+  };
+
+  useEffect(() => {
+    const onScroll = () => {
+      setDockVisible(true);
+      scheduleHide(3000);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll as any);
+      clearHideTimer();
+    };
+  }, []);
+
   // Hide on onboarding, and when not authenticated
   if (!user || onOnboarding) return null;
 
   return (
-    <div className="fixed inset-x-0 bottom-4 z-[60] flex items-center justify-center pointer-events-none">
+    <div className={`fixed inset-x-0 bottom-4 z-[60] flex items-center justify-center pointer-events-none transition-opacity duration-300 ${dockVisible ? "opacity-100" : "opacity-0"}`}>
       <nav className="pointer-events-auto flex items-center gap-4 rounded-full border border-black/10 bg-white/90 backdrop-blur px-4 py-2 shadow-lg">
         <Link
           to="/browse"
@@ -131,7 +159,10 @@ function FloatingNav() {
         </Link>
         <Link
           to="/profile"
-          onMouseEnter={() => prefetchRoute("/profile")}
+          onMouseEnter={() => { setDockVisible(true); scheduleHide(3000); }}
+          onFocus={() => { setDockVisible(true); scheduleHide(3000); }}
+          onMouseLeave={() => { scheduleHide(3000); }}
+          onBlur={() => { scheduleHide(3000); }}
           className="grid h-12 w-12 place-items-center rounded-full border border-black/10 hover:bg-black/[0.04]"
           aria-label="Home"
           title="Home"
@@ -194,7 +225,13 @@ class AppErrorBoundary extends React.Component<
    ========================= */
 function RootRoute() {
   const { user, loading } = useAuth();
-  if (loading) return null;
+  if (loading) {
+    return (
+      <div className="grid min-h-dvh place-items-center text-sm text-neutral-600">
+        Loading…
+      </div>
+    );
+  }
   return <Navigate to={user ? "/profile" : "/onboarding"} replace />;
 }
 function GroupRedirect() {
