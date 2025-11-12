@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "../lib/supabase";
+import { supabase } from "@/lib/supabase";
 import { useNavigate, Link } from "react-router-dom";
 
 // map for quick lookups when rendering selected chips

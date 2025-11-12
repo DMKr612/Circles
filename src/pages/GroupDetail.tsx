@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, lazy, Suspense, type FormEvent } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 
-import { supabase } from "../lib/supabase";
+import { supabase } from "@/lib/supabase";
 console.log('[SUPABASE]', import.meta.env?.VITE_SUPABASE_URL, String((import.meta.env?.VITE_SUPABASE_ANON_KEY||'')).slice(0,8));
 
 

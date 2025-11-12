@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { supabase } from "../src/lib/supabase";
+import { supabase } from "@/lib/supabase";
 
 type ChatMessage = {
   id: string;

@@ -98,23 +98,9 @@ function RequireAuth({ children }: PropsWithChildren): JSX.Element | null {
 }
 
 /* =========================
-   HomeButton
+   HomeButton (REMOVED)
    ========================= */
-function HomeButton() {
-  return (
-    <div className="fixed fab-offset-top left-4 z-50">
-      <Link
-        to="/onboarding"
-        onMouseEnter={() => prefetchRoute("/onboarding")}
-        className="flex items-center justify-center h-10 w-10 rounded-full border border-black/10 bg-white/90 text-xl shadow-md hover:bg-black/[0.04]"
-        aria-label="Onboarding"
-        title="Onboarding"
-      >
-        🎯
-      </Link>
-    </div>
-  );
-}
+// The HomeButton function that was here (lines 106-119) has been removed.
 
 function FloatingNav() {
   const { user } = useAuth();
@@ -223,17 +209,7 @@ class AppErrorBoundary extends React.Component<
 /* =========================
    Root helpers
    ========================= */
-function RootRoute() {
-  const { user, loading } = useAuth();
-  if (loading) {
-    return (
-      <div className="grid min-h-dvh place-items-center text-sm text-neutral-600">
-        Loading…
-      </div>
-    );
-  }
-  return <Navigate to={user ? "/profile" : "/onboarding"} replace />;
-}
+// REMOVED the RootRoute function
 function GroupRedirect() {
   const { id } = useParams();
   return <Navigate to={`/group/${id}`} replace />;
@@ -265,7 +241,22 @@ export default function App() {
   return (
     <div id="page-root" className="min-h-dvh flow-root flex flex-col">
       <AuthProvider>
-          <HomeButton />
+          {/* REMOVED <HomeButton /> */}
+          
+          {/* --- THIS IS THE SUPPORT BUTTON YOU ASKED FOR --- */}
+          <button
+            onClick={() => {
+              // You can build this out later
+              console.log("Support button clicked");
+            }}
+            className="fixed bottom-4 left-4 z-40 grid h-12 w-12 place-items-center rounded-full border border-black/10 bg-white text-2xl shadow-lg transition-transform hover:scale-105"
+            title="Support"
+            aria-label="Support"
+          >
+            <span>❓</span>
+          </button>
+          {/* --- END OF SUPPORT BUTTON --- */}
+
           <FloatingNav />
           <AppErrorBoundary>
             <Suspense
@@ -276,8 +267,7 @@ export default function App() {
               }
             >
               <Routes>
-                {/* Root: go to profile if logged in, else onboarding */}
-                <Route path="/" element={<RootRoute />} />
+                {/* REMOVED the RootRoute path */}
 
                 {/* Public */}
                 <Route path="/onboarding" element={<Onboarding />} />

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { supabase } from "../lib/supabase";
+import { supabase } from "@/lib/supabase";
 
 // Simple 8-char A–Z/0–9 code guard; relax if your format differs
 const CODE_RE = /^[A-Z0-9]{6,12}$/i;
