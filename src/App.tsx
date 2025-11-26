@@ -21,6 +21,8 @@ import {
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "./lib/supabase";
 import { Home, Search, PlusSquare, User as UserIcon, HelpCircle } from "lucide-react"; // Modern icons
+import Layout from "@/components/Layout";
+
 
 // Pages (lazy imports)
 const BrowsePage = lazy(() => import("./pages/Browse"));
@@ -241,7 +243,6 @@ export default function App() {
             <HelpCircle className="h-6 w-6" />
           </button>
 
-          <BottomNav />
           
           <AppErrorBoundary>
             <Suspense
@@ -254,11 +255,11 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<Navigate to="/onboarding" replace />} />
                 <Route path="/onboarding" element={<Onboarding />} />
-                <Route path="/browse" element={<BrowsePage />} />
-                <Route path="/groups" element={<Groups />} />
                 <Route path="/invite/:code" element={<JoinByCode />} />
 
-                <Route element={<RequireAuth><Outlet /></RequireAuth>}>
+                <Route element={<RequireAuth><Layout /></RequireAuth>}>
+                  <Route path="/browse" element={<BrowsePage />} />
+                  <Route path="/groups" element={<Groups />} />
                   <Route path="/notifications" element={<NotificationsPage />} />
                   <Route path="/profile" element={<Profile />} />
                   <Route path="/profile/:userId" element={<Profile />} />

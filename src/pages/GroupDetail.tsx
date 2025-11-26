@@ -6,7 +6,7 @@ import type { Group, Message, Poll, PollOption, GroupMember } from "@/types";
 console.log('[SUPABASE]', import.meta.env?.VITE_SUPABASE_URL, String((import.meta.env?.VITE_SUPABASE_ANON_KEY||'')).slice(0,8));
 
 
-const ChatPanel = lazy(() => import("../../components/ChatPanel"));
+const ChatPanel = lazy(() => import("../components/ChatPanel"));
 
 export default function GroupDetail() {
   const { id = "" } = useParams<{ id: string }>();
