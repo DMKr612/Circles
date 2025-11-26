@@ -2,46 +2,9 @@ import { useEffect, useState, useRef, lazy, Suspense, type FormEvent } from "rea
 import { useParams, useNavigate, Link } from "react-router-dom";
 
 import { supabase } from "@/lib/supabase";
+import type { Group, Message, Poll, PollOption, GroupMember } from "@/types";
 console.log('[SUPABASE]', import.meta.env?.VITE_SUPABASE_URL, String((import.meta.env?.VITE_SUPABASE_ANON_KEY||'')).slice(0,8));
 
-
-// --- Types ---
-type ChatPanelProps = {
-  groupId: string;
-  onClose: () => void;
-  full: boolean;
-  setFull: (v: boolean) => void;
-};
-// --- Types ---
- type Group = {
-  id: string;
-  host_id: string;
-  creator_id?: string | null;
-  title: string;
-  purpose: string | null; // description
-  category: string | null;
-  capacity: number;
-  visibility: string | null;
-  is_online: boolean;
-  online_link: string | null;
-  location: string | null;
-  city: string | null;
-  created_at: string;
-  code?: string | null;
-};
-
- type Message = {
-  id: string;
-  group_id: string;
-  user_id: string;
-  content: string;
-  created_at: string;
-  profiles?: { name: string | null } | null;
-};
-
-type Poll = { id: string; group_id: string; title: string; status: string; closes_at: string | null; created_by: string };
-type PollOption = { id: string; poll_id: string; label: string; starts_at: string | null; place: string | null };
-type Member = { user_id: string; role: string | null; name: string | null; created_at: string };
 
 const ChatPanel = lazy(() => import("../../components/ChatPanel"));
 
@@ -74,7 +37,7 @@ export default function GroupDetail() {
   const [memberCount, setMemberCount] = useState<number>(0);
   const [votedCount, setVotedCount] = useState<number>(0);
   const [votingBusy, setVotingBusy] = useState<string | null>(null); // option_id being cast
-  const [members, setMembers] = useState<Member[]>([]);
+  const [members, setMembers] = useState<GroupMember[]>([]);
   const [isMember, setIsMember] = useState(false);
   // --- Friend actions state ---
   type FriendState = 'none' | 'pending_in' | 'pending_out' | 'accepted' | 'blocked';
@@ -171,7 +134,7 @@ export default function GroupDetail() {
       if (!group?.id) { setMembers([]); return; }
     let dataRes = await supabase
       .from('group_members')
-      .select('user_id, role, created_at, profiles(user_id, name)')
+      .select('user_id, role, created_at, status, group_id, profiles(user_id, name)')
       .eq('group_id', group.id)
       .eq('status', 'active')
       .order('created_at', { ascending: true });
@@ -181,7 +144,7 @@ export default function GroupDetail() {
         // fallback without join, fetch names separately
         const bare = await supabase
           .from('group_members')
-          .select('user_id, role, created_at')
+          .select('user_id, role, created_at, status, group_id')
           .eq('group_id', group.id)
           .eq('status', 'active')
           .order('created_at', { ascending: true });
@@ -192,10 +155,12 @@ export default function GroupDetail() {
         user_id: r.user_id as string,
         role: (r.role as string) ?? null,
         created_at: r.created_at as string,
+        group_id: (r.group_id as string) ?? group.id,
+        status: (r.status as string) ?? 'active',
         name: r.profiles?.name ?? null,
       }));
       if (off) return;
-      setMembers(arr as Member[]);
+      setMembers(arr);
       // am I a member?
       const meId = (await supabase.auth.getUser()).data.user?.id || null;
       if (meId) setIsMember(arr.some((a: any) => a.user_id === meId));
@@ -252,7 +217,7 @@ export default function GroupDetail() {
     // refresh members
     const { data } = await supabase
       .from("group_members")
-      .select("user_id, role, created_at, profiles(user_id, name)")
+      .select("user_id, role, created_at, status, group_id, profiles(user_id, name)")
       .eq("group_id", group.id)
       .eq("status", "active")
       .order("created_at", { ascending: true });
@@ -260,9 +225,11 @@ export default function GroupDetail() {
       user_id: r.user_id as string,
       role: (r.role as string) ?? null,
       created_at: r.created_at as string,
+      group_id: (r.group_id as string) ?? group.id,
+      status: (r.status as string) ?? "active",
       name: r.profiles?.name ?? null,
     }));
-    setMembers(arr as Member[]);
+    setMembers(arr);
     setIsMember(false);
     setMsg("You left the group.");
   }
@@ -354,7 +321,7 @@ async function joinGroup() {
   // refresh list + count
   const { data } = await supabase
     .from("group_members")
-    .select("user_id, role, created_at, profiles(user_id, name)")
+    .select("user_id, role, created_at, status, group_id, profiles(user_id, name)")
     .eq("group_id", id)
     .eq("status", "active")
     .order("created_at", { ascending: true });
@@ -363,9 +330,11 @@ async function joinGroup() {
     user_id: r.user_id as string,
     role: (r.role as string) ?? null,
     created_at: r.created_at as string,
+    group_id: (r.group_id as string) ?? (group?.id ?? id),
+    status: (r.status as string) ?? "active",
     name: r.profiles?.name ?? null,
   }));
-  setMembers(arr as Member[]);
+  setMembers(arr);
   setMemberCount(arr.length);
 }
 

@@ -1,15 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
-
-type ChatMessage = {
-  id: string;
-  group_id: string;
-  user_id: string;
-  content: string;
-  created_at: string;
-  parent_id: string | null;
-  attachments: any[];
-};
+import type { Message } from "@/types";
 
 type Profile = { user_id: string; id?: string; name: string | null; avatar_url?: string | null };
 type Member = { user_id: string; name: string | null; avatar_url?: string | null };
@@ -55,12 +46,12 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
   const [myEmail, setMyEmail] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<Map<string, Profile>>(new Map());
 
-  const [msgs, setMsgs] = useState<ChatMessage[]>([]);
+  const [msgs, setMsgs] = useState<Message[]>([]);
   const [reactions, setReactions] = useState<Map<string, Record<string, string[]>>>(new Map());
   const [reads, setReads] = useState<Map<string, string[]>>(new Map());
 
   const [input, setInput] = useState("");
-  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
 
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -189,7 +180,7 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
       if (aborted) return;
       if (error) { console.error(error); setLoading(false); return; }
 
-      const arr = (data ?? []).reverse() as ChatMessage[];
+      const arr = (data ?? []).reverse() as Message[];
       setMsgs(arr);
       setHasMore((data ?? []).length === pageSize);
       setLoading(false);
@@ -256,7 +247,7 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
       async (payload) => {
         const raw = payload.new as any;
         if (raw.group_id !== groupId) return;
-        const m: ChatMessage = {
+        const m: Message = {
           id: raw.id,
           group_id: raw.group_id,
           user_id: raw.user_id ?? raw.author_id,
@@ -371,7 +362,7 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
       .order("created_at", { ascending: false })
       .limit(pageSize);
     if (error) { console.error(error); return; }
-    const arr = (data ?? []).reverse() as ChatMessage[];
+    const arr = (data ?? []).reverse() as Message[];
     if (arr.length < pageSize) setHasMore(false);
     setMsgs(prev => [...arr, ...prev]);
   };
@@ -465,7 +456,7 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
 
     setSending(true);
     const phantomId = `phantom-${getUUID()}`;
-    const phantom: ChatMessage = {
+    const phantom: Message = {
       id: phantomId,
       group_id: groupId,
       user_id: uid,

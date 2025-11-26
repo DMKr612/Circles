@@ -1,44 +1,15 @@
 import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { Search, Users, Tag, ArrowLeft, Sparkles, Globe, MapPin, ChevronDown, ChevronUp } from "lucide-react";
+import { CATEGORIES, GAME_LIST } from "@/lib/constants";
+import type { BrowseGroupRow } from "@/types";
+import { Search, Users, Tag, ArrowLeft, Globe, MapPin, ChevronDown, ChevronUp } from "lucide-react";
 
 /**
  * BrowsePage
  * Modern, mobile-optimized browse screen.
  * "Filter by Game" removed. "Recent Groups" is collapsible and shows location context.
  */
-
-export type Game = {
-  id: string;
-  name: string;
-  blurb: string;
-  tag: string;
-  online: number;
-  groups: number;
-  image: string;
-};
-
-type GroupRow = { id: string; title: string | null; description?: string | null; city?: string | null; category?: string | null; capacity?: number | null; created_at?: string | null; game?: string | null; code?: string | null; };
-
-const CATEGORIES = ["All", "Games", "Study", "Outdoors"] as const;
-
-export const GAMES: Game[] = [
-  { id: "hokm",   name: "Hokm",        blurb: "Classic Persian card game",      tag: "Games",    online: 120, groups: 8,  image: "🎴" },
-  { id: "takhtenard",   name: "Takhte Nard", blurb: "Traditional backgammon",         tag: "Games",    online: 95,  groups: 6,  image: "🎲" },
-  { id: "mafia",  name: "Mafia",       blurb: "Social deduction party game",     tag: "Games",    online: 210, groups: 12, image: "🕵️" },
-  { id: "mono",   name: "Monopoly",    blurb: "Buy, sell, and trade properties", tag: "Games",    online: 180, groups: 10, image: "💰" },
-  { id: "uno",    name: "Uno",         blurb: "Colorful card matching fun",      tag: "Games",    online: 250, groups: 15, image: "🃏" },
-  { id: "chess",  name: "Chess",       blurb: "Classic strategy board game",     tag: "Games",    online: 130, groups: 9,  image: "♟️" },
-  { id: "mathematics",   name: "Mathematics", blurb: "Study numbers", tag: "Study",   online: 75,  groups: 5,  image: "📐" },
-  { id: "biology",    name: "Biology",     blurb: "Explore life sciences",             tag: "Study",   online: 60,  groups: 4,  image: "🧬" },
-  { id: "chemistry",   name: "Chemistry",   blurb: "Chemicals and reactions", tag: "Study",  online: 50,  groups: 3,  image: "⚗️" },
-  { id: "history",   name: "History",     blurb: "Past events and cultures",  tag: "Study",  online: 45,  groups: 3,  image: "📜" },
-  { id: "dreisam",  name: "Hiking", blurb: "Join a hike up the mountain", tag: "Outdoors", online: 40, groups: 3,  image: "⛰️" },
-  { id: "visit",   name: "Visiting",    blurb: "Cultural and city visits",            tag: "Outdoors", online: 55, groups: 4,  image: "🏛️" },
-  { id: "camp",    name: "Camping",     blurb: "Overnight outdoor trips",     tag: "Outdoors", online: 35, groups: 2,  image: "🏕️" },
-  { id: "kayak",   name: "Kayaking",    blurb: "Water adventures", tag: "Outdoors", online: 30, groups: 2, image: "🛶" },
-];
 
 export default function BrowsePage() {
   const [params, setParams] = useSearchParams();
@@ -52,7 +23,7 @@ export default function BrowsePage() {
   // Dropdown state for Recent Groups (default open)
   const [recentGroupsOpen, setRecentGroupsOpen] = useState(true); 
 
-  const [groups, setGroups] = useState<GroupRow[]>([]);
+  const [groups, setGroups] = useState<BrowseGroupRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
   
@@ -109,7 +80,7 @@ export default function BrowsePage() {
             const cleaned = raw.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
             const { data, error } = await supabase
                 .from("groups")
-                .select("id, title, description, city, category, game, created_at, code")
+                .select("id, title, description, city, category, game, capacity, created_at, code")
                 .or(`code.eq.${cleaned},id.eq.${raw}`) // check code OR uuid
                 .maybeSingle();
             
@@ -125,7 +96,7 @@ export default function BrowsePage() {
         // 2. Browse Recent
         let query = supabase
           .from("groups")
-          .select("id, title, description, city, category, game, created_at, code")
+          .select("id, title, description, city, category, game, capacity, created_at, code")
           .order("created_at", { ascending: false })
           .limit(50);
 
@@ -179,7 +150,7 @@ export default function BrowsePage() {
 
   // Filter games for the dropdown based on search/category
   const filteredGames = useMemo(() => {
-    const byCat = cat === "All" ? GAMES : GAMES.filter(g => g.tag === cat);
+    const byCat = cat === "All" ? GAME_LIST : GAME_LIST.filter(g => g.tag === cat);
     if (!q) return byCat;
     return byCat.filter(g => g.name.toLowerCase().includes(q.toLowerCase()));
   }, [q, cat]);

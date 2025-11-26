@@ -2,30 +2,15 @@ import React, { useEffect, useMemo, useState, useRef, useCallback, useDeferredVa
 // FIX: Use a relative path from `components/` to `src/lib/`
 import { supabase } from "@/lib/supabase";
 import { Link } from "react-router-dom";
+import type { Thread, DMMessage } from "@/types";
 
 // Types
-type Thread = {
-  other_id: string;
-  name: string;
-  avatar_url: string | null;
-  last_body: string;
-  last_at: string;
-  last_from_me: boolean;
-  unread: boolean;
-};
 type FriendShipRow = {
   id: string;
   user_id_a: string;
   user_id_b: string;
   status: 'pending' | 'accepted' | 'blocked';
   requested_by: string;
-};
-type DMMessage = { 
-  id: string; 
-  from_id: string; 
-  to_id: string; 
-  body: string; 
-  created_at: string 
 };
 type ProfileStub = {
   name: string;
