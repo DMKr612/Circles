@@ -243,6 +243,7 @@ export default function Profile() {
  
   // --- ADDED THIS STATE ---
   const [otherUserGamesTotal, setOtherUserGamesTotal] = useState<number>(0);
+  const [theirFriendCount, setTheirFriendCount] = useState<number>(0);
 
   // --- UI ---
   const [loading, setLoading] = useState(true);
@@ -852,6 +853,14 @@ export default function Profile() {
       .limit(1)
       .maybeSingle();
 
+    // [NEW] Get their friend count
+    const { data: fr } = await supabase
+      .from('friendships')
+      .select('id')
+      .or(`user_id_a.eq.${otherId},user_id_b.eq.${otherId}`)
+      .eq('status', 'accepted');
+    setTheirFriendCount(fr?.length || 0);
+
     // [FIX] Define FriendState type
     type FriendState = 'none' | 'pending_in' | 'pending_out' | 'accepted' | 'blocked';
     let st: FriendState = 'none';
@@ -1247,15 +1256,16 @@ export default function Profile() {
                   const handleOpen = () => { setSidebarOpen(true); openThread(t.other_id); };
                   return (
                     <FriendRow
-                      key={t.other_id}
-                      _otherId={t.other_id}
-                      name={t.name}
-                      avatarUrl={t.avatar_url}
-                      lastBody={t.last_body}
-                      lastAt={t.last_at}
-                      unread={t.unread}
-                      onOpen={handleOpen}
-                    />
+  key={t.other_id}
+  _otherId={t.other_id}
+  name={t.name}
+  avatarUrl={t.avatar_url}
+  lastBody={t.last_body}
+  lastAt={t.last_at}
+  unread={t.unread}
+  onOpen={handleOpen}
+  onView={() => openProfileView(t.other_id)}
+/>
                   );
                 })}
               </Card>
@@ -1428,7 +1438,13 @@ export default function Profile() {
       {/* --- Games Played Modal --- */}
       {gamesModalOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40">
-          <div className="w-[560px] max-w-[92vw] rounded-2xl border border-black/10 bg-white p-5 shadow-xl">
+          <div className="w-[95vw] sm:w-[480px] md:w-[560px] rounded-2xl border border-black/10 bg-white p-5 shadow-xl relative">
+            <button
+              onClick={() => setGamesModalOpen(false)}
+              className="absolute top-3 right-3 text-neutral-500 hover:text-neutral-800 text-xl"
+            >
+              ×
+            </button>
             <div className="mb-4 flex items-center justify-between">
               <div className="text-base font-semibold text-neutral-900">Games Played</div>
               <button
@@ -1480,162 +1496,175 @@ export default function Profile() {
       {settingsOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40">
           <form
-  onSubmit={(e) => { e.preventDefault(); saveSettings(); }}
-  className="w-[560px] max-w-[92vw] rounded-2xl border border-black/10 bg-white shadow-xl max-h-[90vh] overflow-hidden flex flex-col"
->
-            <div className="mb-4 flex items-center justify-between">
-              <div className="text-base font-semibold text-neutral-900">Edit Profile</div>
-              <button
-                type="button"
-                onClick={() => setSettingsOpen(false)}
-                className="rounded-md border border-black/10 px-2 py-1 text-sm"
-              >
-                Close
-              </button>
-            </div>
+            onSubmit={(e) => { e.preventDefault(); saveSettings(); }}
+            className="w-[560px] max-w-[92vw] rounded-2xl border border-black/10 bg-white shadow-xl max-h-[90vh] overflow-hidden flex flex-col"
+          >
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
 
-            <div className="space-y-3">
-              <div>
-                <label className="mb-1 block text-sm font-medium text-neutral-800">Name</label>
-                <input
-                  value={sName}
-                  onChange={(e) => { setSName(e.target.value); setSettingsDirty(true); }}
-                  className="w-full rounded-md border border-black/10 px-3 py-2 text-sm"
-                  placeholder="Your name"
-                  required
-                />
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-base font-semibold text-neutral-900">Edit Profile</div>
+                <button
+                  type="button"
+                  onClick={() => setSettingsOpen(false)}
+                  className="rounded-md border border-black/10 px-2 py-1 text-sm"
+                >
+                  Close
+                </button>
               </div>
 
-              <div>
-                <label className="mb-1 block text-sm font-medium text-neutral-800">Avatar</label>
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-neutral-200 grid place-items-center overflow-hidden">
-                    {avatarUrl ? <img src={avatarUrl} alt="" className="h-10 w-10 object-cover" /> : <span className="text-xs">{headerInitials}</span>}
+              <div className="rounded-xl border border-black/5 bg-neutral-50/80 p-4 shadow-inner space-y-4">
+                <div className="text-sm font-semibold text-neutral-700">Profile</div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-neutral-800">Name</label>
+                  <input
+                    value={sName}
+                    onChange={(e) => { setSName(e.target.value); setSettingsDirty(true); }}
+                    className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm focus:border-emerald-600"
+                    placeholder="Your name"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-neutral-800">Avatar</label>
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-neutral-200 grid place-items-center overflow-hidden">
+                      {avatarUrl ? (
+                        <img src={avatarUrl} alt="" className="h-10 w-10 object-cover" />
+                      ) : (
+                        <span className="text-xs">{headerInitials}</span>
+                      )}
+                    </div>
+                    <input type="file" accept="image/*" onChange={onAvatarChange} className="text-sm" />
+                    {avatarUploading && <span className="text-xs text-neutral-600">Uploading…</span>}
                   </div>
-                  <input type="file" accept="image/*" onChange={onAvatarChange} className="text-sm" />
-                  {avatarUploading && <span className="text-xs text-neutral-600">Uploading…</span>}
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-neutral-800">City</label>
+                    <input
+                      value={sCity}
+                      onChange={(e) => { setSCity(e.target.value); setSettingsDirty(true); }}
+                      onBlur={() => { if (!sTimezone || sTimezone === "UTC") setSTimezone(deviceTZ()); }}
+                      className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm focus:border-emerald-600"
+                      placeholder="Start typing… e.g., Berlin"
+                      list="cities-de"
+                      required
+                    />
+                    <datalist id="cities-de">
+                      {DE_CITIES.map((c) => (
+                        <option key={c} value={c} />
+                      ))}
+                    </datalist>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-neutral-800">Timezone</label>
+                    <input
+                      value={sTimezone}
+                      onChange={(e) => { setSTimezone(e.target.value); setSettingsDirty(true); }}
+                      className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm focus:border-emerald-600"
+                      placeholder="e.g., Europe/Berlin"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-neutral-800">Interests</label>
+                  <input
+                    value={sInterests}
+                    onChange={(e) => { setSInterests(e.target.value); setSettingsDirty(true); }}
+                    className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm focus:border-emerald-600"
+                    placeholder="comma, separated, tags"
+                  />
                 </div>
               </div>
 
-              <div>
-                <label className="mb-1 block text-sm font-medium text-neutral-800">City</label>
-                <input
-                  value={sCity}
-                  onChange={(e) => { setSCity(e.target.value); setSettingsDirty(true); }}
-                  onBlur={() => { if (!sTimezone || sTimezone === "UTC") setSTimezone(deviceTZ()); }}
-                  className="w-full rounded-md border border-black/10 px-3 py-2 text-sm"
-                  placeholder="Start typing… e.g., Berlin"
-                  list="cities-de"
-                  required
-                />
-                <datalist id="cities-de">
-                  {/* --- [FIX] Use top-level DE_CITIES constant --- */}
-                  {DE_CITIES.map((c) => (
-                    <option key={c} value={c} />
-                  ))}
-                </datalist>
-                <div className="mt-1 text-[11px] text-neutral-500">
-                  Choose your city. This powers “My city” filters in Browse.
+              <div className="rounded-xl border border-black/5 bg-neutral-50/80 p-4 shadow-inner space-y-3">
+                <div className="text-sm font-semibold text-neutral-700">Appearance & Privacy</div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-neutral-800">Theme</label>
+                  <select
+                    value={sTheme}
+                    onChange={(e) => setSTheme(e.target.value as 'system'|'light'|'dark')}
+                    className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm focus:border-emerald-600"
+                  >
+                    <option value="system">System</option>
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-black/5 bg-white px-3 py-2">
+                  <div>
+                    <div className="text-sm font-medium text-neutral-800">Allow profile ratings</div>
+                    <div className="text-[11px] text-neutral-500">Others can rate you when enabled.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => saveAllowRatings(!allowRatings)}
+                    className={`h-7 w-12 rounded-full ${allowRatings ? 'bg-emerald-600' : 'bg-neutral-300'} relative`}
+                  >
+                    <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white transition ${allowRatings ? 'right-0.5' : 'left-0.5'}`} />
+                  </button>
                 </div>
               </div>
 
-              <div>
-                <label className="mb-1 block text-sm font-medium text-neutral-800">Timezone</label>
-                <input
-                  value={sTimezone}
-                  onChange={(e) => { setSTimezone(e.target.value); setSettingsDirty(true); }}
-                  className="w-full rounded-md border border-black/10 px-3 py-2 text-sm"
-                  placeholder="e.g., Europe/Berlin"
-                />
-                <div className="mt-1 text-[11px] text-neutral-500">
-                  Auto-fills from your device when you set City. You can still override manually.
+              <div className="rounded-xl border border-black/5 bg-neutral-50/80 p-4 shadow-inner space-y-3">
+                <div className="text-sm font-semibold text-neutral-700">Notifications</div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    id="emailNotifs"
+                    type="checkbox"
+                    checked={emailNotifs}
+                    onChange={(e) => setEmailNotifs(e.target.checked)}
+                    className="h-4 w-4 rounded border-black/20"
+                  />
+                  <label htmlFor="emailNotifs" className="text-sm text-neutral-800">Email notifications</label>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    id="pushNotifs"
+                    type="checkbox"
+                    checked={pushNotifs}
+                    onChange={(e) => setPushNotifs(e.target.checked)}
+                    className="h-4 w-4 rounded border-black/20"
+                  />
+                  <label htmlFor="pushNotifs" className="text-sm text-neutral-800">Push notifications</label>
                 </div>
               </div>
 
-              <div>
-                <label className="mb-1 block text-sm font-medium text-neutral-800">Interests</label>
-                <input
-                  value={sInterests}
-                  onChange={(e) => { setSInterests(e.target.value); setSettingsDirty(true); }}
-                  className="w-full rounded-md border border-black/10 px-3 py-2 text-sm"
-                  placeholder="comma, separated, tags"
-                />
-                <div className="mt-1 text-[11px] text-neutral-500">Saved as tags in your profile.</div>
-              </div>
+              {settingsMsg && (
+                <div className={`rounded-md border px-3 py-2 text-sm ${settingsMsg === 'Saved.' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
+                  {settingsMsg}
+                </div>
+              )}
+
             </div>
 
-            <div>
-              <label className="mb-1 block text-sm font-medium text-neutral-800">Theme</label>
-              <select
-                value={sTheme}
-                onChange={(e) => setSTheme(e.target.value as 'system'|'light'|'dark')}
-                className="w-full rounded-md border border-black/10 px-3 py-2 text-sm"
-              >
-                <option value="system">System</option>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
-              </select>
-              <div className="mt-1 text-[11px] text-neutral-500">Light/Dark applies after save.</div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input
-                id="emailNotifs"
-                type="checkbox"
-                checked={emailNotifs}
-                onChange={(e) => setEmailNotifs(e.target.checked)}
-                className="h-4 w-4 rounded border-black/20"
-              />
-              <label htmlFor="emailNotifs" className="text-sm text-neutral-800">Email notifications</label>
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                id="pushNotifs"
-                type="checkbox"
-                checked={pushNotifs}
-                onChange={(e) => setPushNotifs(e.target.checked)}
-                className="h-4 w-4 rounded border-black/20"
-              />
-              <label htmlFor="pushNotifs" className="text-sm text-neutral-800">Push notifications</label>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <div className="text-sm font-medium text-neutral-800">Allow profile ratings</div>
-                <div className="text-[11px] text-neutral-500">Others can rate you when enabled.</div>
+            <div className="shrink-0 px-5 py-3 border-t border-black/10 space-y-3">
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSettingsOpen(false)}
+                  className="rounded-md border border-black/10 bg-white px-3 py-1.5 text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={settingsSaving}
+                  className={`rounded-md px-3 py-1.5 text-sm text-white ${settingsSaving ? "bg-neutral-400" : "bg-emerald-600 hover:bg-emerald-700"}`}
+                >
+                  {settingsSaving ? "Saving…" : "Save"}
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => saveAllowRatings(!allowRatings)}
-                className={`h-7 w-12 rounded-full ${allowRatings ? 'bg-emerald-600' : 'bg-neutral-300'} relative`}
-                aria-pressed={allowRatings}
-              >
-                <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white transition ${allowRatings ? 'right-0.5' : 'left-0.5'}`} />
-              </button>
-            </div>
-            {settingsMsg && (
-              <div className={`mt-3 rounded-md border px-3 py-2 text-sm ${settingsMsg === 'Saved.' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
-                {settingsMsg}
-              </div>
-            )}
 
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setSettingsOpen(false)}
-                className="rounded-md border border-black/10 bg-white px-3 py-1.5 text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={settingsSaving}
-                className={`rounded-md px-3 py-1.5 text-sm text-white ${settingsSaving ? "bg-neutral-400" : "bg-emerald-600 hover:bg-emerald-700"}`}
-              >
-                {settingsSaving ? "Saving…" : "Save"}
-              </button>
-            </div>
-            {/* Logout Button */}
-            <div className="mt-6">
               <button
                 type="button"
                 onClick={logout}
@@ -1644,6 +1673,7 @@ export default function Profile() {
                 Sign Out
               </button>
             </div>
+
           </form>
         </div>
       )}
@@ -1651,7 +1681,13 @@ export default function Profile() {
       {/* --- View Other Profile Modal --- */}
       {viewOpen && viewUserId && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40">
-          <div className="w-[560px] max-w-[92vw] rounded-2xl border border-black/10 bg-white p-5 shadow-xl">
+          <div className="w-[95vw] sm:w-[480px] md:w-[560px] rounded-2xl border border-black/10 bg-white p-5 shadow-xl relative">
+            <button
+              onClick={() => setViewOpen(false)}
+              className="absolute top-3 right-3 text-neutral-500 hover:text-neutral-800 text-xl"
+            >
+              ×
+            </button>
             <div className="mb-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="h-12 w-12 rounded-full bg-neutral-200 grid place-items-center overflow-hidden">
@@ -1693,7 +1729,7 @@ export default function Profile() {
                       </div>
                     </div>
                   </div>
-                  <div className="text-xs text-neutral-600">{viewUserId}</div>
+                  {/* <div className="text-xs text-neutral-600">{viewUserId}</div> */}
                 </div>
               </div>
               <button onClick={() => setViewOpen(false)} className="rounded-md border border-black/10 px-2 py-1 text-sm">Close</button>
@@ -1732,6 +1768,32 @@ export default function Profile() {
                   >Add Friend</button>
                 )}
               </div>
+              {/* --- Extra Info: Groups & Shared Groups --- */}
+              <div className="mt-4 rounded-md border border-black/10 p-3 text-sm space-y-2">
+                <div className="font-medium text-neutral-800">Group Activity</div>
+
+                <div className="text-neutral-700">
+                  <b>Total groups joined:</b> {otherUserGamesTotal}
+                </div>
+
+                <div className="text-neutral-700">
+                  <b>Rating:</b> {viewRatingAvg.toFixed(1)} / 6  
+                  <span className="text-neutral-500"> ({viewRatingCount} ratings)</span>
+                </div>
+                <div className="text-neutral-700">
+                  <b>Total friends:</b> {theirFriendCount}
+                </div>
+
+                {/* Shared groups */}
+                <div className="mt-3">
+                  <div className="font-medium text-neutral-800">Groups you both joined:</div>
+                  {!uid || !viewUserId ? (
+                    <div className="text-neutral-600 text-sm">Loading…</div>
+                  ) : (
+                    <SharedGroups me={uid} other={viewUserId} />
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1740,6 +1802,52 @@ export default function Profile() {
   );
 }
 
+
+
+// --- SharedGroups component for View Other Profile Modal ---
+function SharedGroups({ me, other }: { me: string; other: string }) {
+  const [groups, setGroups] = React.useState<any[]>([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    (async () => {
+      const { data: myGroups } = await supabase
+        .from('group_members')
+        .select('group_id')
+        .eq('user_id', me)
+        .eq('status', 'active');
+
+      const { data: theirGroups } = await supabase
+        .from('group_members')
+        .select('group_id, groups(title)')
+        .eq('user_id', other)
+        .eq('status', 'active');
+
+      const mineSet = new Set(myGroups?.map(g => g.group_id));
+      const shared = (theirGroups ?? []).filter(g => mineSet.has(g.group_id));
+
+      setGroups(shared);
+      setLoading(false);
+    })();
+  }, [me, other]);
+
+  if (loading) return <div className="text-neutral-600 text-sm">Loading…</div>;
+  if (groups.length === 0) return <div className="text-neutral-600 text-sm">No shared groups.</div>;
+
+  return (
+    <div className="flex flex-wrap gap-2 mt-1">
+      {groups.map(g => (
+        <div
+          key={g.group_id}
+          className="px-2 py-1 bg-neutral-100 text-neutral-800 text-xs rounded-md flex items-center gap-2"
+        >
+          {g.groups?.title || g.group_id.slice(0,6)}
+          <Link to={`/group/${g.group_id}`} className="text-emerald-700 hover:underline text-[11px]">Open</Link>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // --- Re-usable Sub-Components ---
 
@@ -1798,7 +1906,7 @@ const Row = React.memo(function Row({ id, title, meta, code }: { id: string; tit
   );
 }, propsShallowEqual);
 
-const FriendRow = React.memo(function FriendRow({ _otherId, name, avatarUrl, lastBody, lastAt, unread, onOpen }: {
+const FriendRow = React.memo(function FriendRow({ _otherId, name, avatarUrl, lastBody, lastAt, unread, onOpen, onView }: {
   _otherId: string;
   name: string;
   avatarUrl: string | null;
@@ -1806,6 +1914,7 @@ const FriendRow = React.memo(function FriendRow({ _otherId, name, avatarUrl, las
   lastAt: string;
   unread: boolean;
   onOpen: () => void;
+  onView: () => void;
 }) {
   return (
     <li className="flex items-center justify-between py-2">
@@ -1819,7 +1928,12 @@ const FriendRow = React.memo(function FriendRow({ _otherId, name, avatarUrl, las
         </div>
         <div>
           {/* --- This link allows clicking a friend's name to see their profile --- */}
-          <Link to={`/profile/${_otherId}`} className="font-medium text-neutral-900 hover:underline">{name}</Link>
+          <button
+  onClick={onView}
+  className="font-medium text-neutral-900 hover:underline text-left"
+>
+  {name}
+</button>
           <div className="text-xs text-neutral-600 truncate max-w-[220px]">{lastBody}</div>
         </div>
       </div>

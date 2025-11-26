@@ -489,6 +489,25 @@ async function joinGroup() {
     setTimeout(() => document.getElementById("polls")?.scrollIntoView({ behavior: "smooth" }), 0);
   }
 
+  async function deleteVoting() {
+    if (!poll) return;
+    const ok = window.confirm("Delete this voting?");
+    if (!ok) return;
+
+    const { error } = await supabase
+      .from("group_polls")
+      .delete()
+      .eq("id", poll.id);
+
+    if (error) { setMsg(error.message); return; }
+
+    setPoll(null);
+    setOptions([]);
+    setCounts({});
+    setVotedCount(0);
+    setMsg("Voting deleted.");
+  }
+
   async function castVote(optionId: string): Promise<void> {
     if (!poll) return;
     setVotingBusy(optionId);
@@ -548,11 +567,14 @@ async function joinGroup() {
 
 return (
 <>
-  <div className={"transition-all duration-300 " + (chatOpen && !chatFull ? "mr-[min(92vw,520px)]" : "") }>
+  <div className={
+    "transition-all duration-300 " +
+    (chatOpen && !chatFull ? "lg:mr-[min(92vw,520px)]" : "")
+  }>
     <div className="mx-auto max-w-5xl px-4 py-6">
-      <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-[200px_1fr]">
         {/* Left: Members */}
-        <aside className="order-2 lg:order-1 rounded-2xl border border-black/10 bg-white p-4 h-max shadow">
+        <aside className="order-2 lg:order-1 rounded-xl border border-black/10 bg-white p-3 h-max shadow-sm">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-neutral-900">Members</h2>
             <span className="text-xs text-neutral-600">{memberCount}</span>
@@ -599,8 +621,8 @@ return (
         {/* Right: Main content */}
         <div className="order-1 lg:order-2">
           {/* Header + Overview */}
-          <div className="rounded-2xl border border-black/10 bg-white p-5 shadow">
-            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div className="rounded-xl border border-black/10 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <div className="mb-1 flex flex-wrap items-center gap-2">
                   <Link to="/browse" className="text-xs text-neutral-500 hover:underline">Browse</Link>
@@ -640,7 +662,7 @@ return (
                   </div>
                 )}
               </div>
-              <div className="flex shrink-0 items-center gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2 w-full sm:w-auto">
                 {!isMember && (
                   <button onClick={joinGroup} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">Join</button>
                 )}
@@ -659,7 +681,12 @@ return (
                       {shareBusy ? 'Creating…' : (shareCopied ? 'Copied!' : 'Share invite')}
                     </button>
                     <button onClick={createVoting} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">Create Voting</button>
-                    <button onClick={handleDelete} className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700">Delete</button>
+                    <button
+                      onClick={handleDelete}
+                      className="rounded-md border border-red-600 text-red-600 px-3 py-1.5 text-sm hover:bg-red-50"
+                    >
+                      Delete
+                    </button>
                   </>
                 )}
               </div>
@@ -690,10 +717,20 @@ return (
           </div>
 
           {/* Voting Section */}
-          <section id="polls" className="mt-6 rounded-2xl border border-black/10 bg-white p-5 shadow">
+          <section id="polls" className="mt-6 rounded-xl border border-black/10 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-neutral-900">Voting</h2>
-              {isHost && poll && <span className="text-xs text-neutral-600">Open</span>}
+              {isHost && poll && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-neutral-600">Open</span>
+                  <button
+                    onClick={deleteVoting}
+                    className="rounded-md border border-red-600 text-red-600 px-2 py-0.5 text-xs hover:bg-red-50"
+                  >
+                    Delete Voting
+                  </button>
+                </div>
+              )}
             </div>
 
             {!poll && <div className="mt-2 text-sm text-neutral-600">No active voting.</div>}

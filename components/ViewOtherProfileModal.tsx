@@ -1,18 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
-// FIX: Use a relative path from `components/` to `src/lib/`
 import { supabase } from "@/lib/supabase";
+import { Users, Trophy, Calendar } from "lucide-react";
 
-// Demo stubs for toast calls
-const success = (m?: string) => console.log("[ok]", m || "");
-const error = (m?: string) => console.error("[err]", m || "");
-
-type PairStatus = {
-  stars: number | null;
-  updated_at: string | null;
-  next_allowed_at: string | null;
-  edit_used: boolean;
-};
-
+// Types
 type FriendState = 'none' | 'pending_in' | 'pending_out' | 'accepted' | 'blocked';
 
 interface ViewOtherProfileModalProps {
@@ -21,33 +11,30 @@ interface ViewOtherProfileModalProps {
   viewUserId: string | null;
 }
 
-function fmtCooldown(secs: number): string {
-  const d = Math.floor(secs / 86400);
-  const h = Math.floor((secs % 86400) / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
-
 export default function ViewOtherProfileModal({ isOpen, onClose, viewUserId }: ViewOtherProfileModalProps) {
   const [uid, setUid] = useState<string | null>(null);
 
-  // Modal state
+  // Profile State
   const [viewName, setViewName] = useState<string>("");
   const [viewAvatar, setViewAvatar] = useState<string | null>(null);
   const [viewAllowRatings, setViewAllowRatings] = useState<boolean>(true);
   const [viewRatingAvg, setViewRatingAvg] = useState<number>(0);
   const [viewRatingCount, setViewRatingCount] = useState<number>(0);
+  
+  // Stats State
+  const [totalGroups, setTotalGroups] = useState<number>(0);
+  const [mutualGroupsCount, setMutualGroupsCount] = useState<number>(0);
+  const [mutualGroupNames, setMutualGroupNames] = useState<string[]>([]);
+  const [targetGroupNames, setTargetGroupNames] = useState<string[]>([]);
+  
+  // Friend/Rating State
   const [myRating, setMyRating] = useState<number>(0);
   const [rateBusy, setRateBusy] = useState(false);
   const [hoverRating, setHoverRating] = useState<number | null>(null);
-  const [myLastRatedAt, setMyLastRatedAt] = useState<string | null>(null);
-  const [pairNextAllowedAt, setPairNextAllowedAt] = useState<string | null>(null);
-  const [pairEditUsed, setPairEditUsed] = useState<boolean>(false);
   const [viewFriendStatus, setViewFriendStatus] = useState<FriendState>('none');
   const [err, setErr] = useState<string | null>(null);
 
+  // Load current user
   useEffect(() => {
     (async () => {
       const { data: auth } = await supabase.auth.getUser();
@@ -55,69 +42,42 @@ export default function ViewOtherProfileModal({ isOpen, onClose, viewUserId }: V
     })();
   }, []);
 
-  // --- Rating logic ---
-  const cooldownSecs = useMemo(() => {
-    if (!pairNextAllowedAt) return 0;
-    const t = new Date(pairNextAllowedAt).getTime();
-    return Math.max(0, Math.floor((t - Date.now()) / 1000));
-  }, [pairNextAllowedAt]);
-
-  const canEditOnce = useMemo(() => {
-    if (!pairNextAllowedAt) return false;
-    const t = new Date(pairNextAllowedAt).getTime();
-    return t > Date.now() && !pairEditUsed;
-  }, [pairNextAllowedAt, pairEditUsed]);
-
-  const canRate = useMemo(
-    () => viewAllowRatings && !rateBusy && (cooldownSecs === 0 || canEditOnce),
-    [viewAllowRatings, rateBusy, cooldownSecs, canEditOnce]
-  );
-  
-  async function loadPairStatus(otherId: string) {
-    if (!uid || !otherId) return;
-    const { data, error } = await supabase
-      .from('rating_pairs')
-      .select('stars,updated_at,next_allowed_at,edit_used')
-      .eq('rater_id', uid)
-      .eq('ratee_id', otherId)
-      .maybeSingle();
-    if (error) return;
-    setMyRating(Number(data?.stars ?? 0));
-    setMyLastRatedAt((data as any)?.updated_at ?? null);
-    setPairNextAllowedAt((data as any)?.next_allowed_at ?? null);
-    setPairEditUsed(Boolean((data as any)?.edit_used ?? false));
-  }
-
-  // Load profile when modal opens or viewUserId changes
+  // Load Target Profile Data
   useEffect(() => {
     if (!isOpen || !viewUserId || !uid) return;
     
-    // Reset state
     setErr(null);
     setRateBusy(false);
     setHoverRating(null);
 
     async function loadData() {
+      // 1. Basic Profile Info
       const { data: prof } = await supabase
         .from("profiles")
-        .select("user_id,name,avatar_url,allow_ratings,rating_avg,rating_count")
+        .select("name,avatar_url,allow_ratings,rating_avg,rating_count")
         .eq("user_id", viewUserId)
         .maybeSingle();
-      setViewName((prof as any)?.name ?? viewUserId!.slice(0,6));
+
+      setViewName((prof as any)?.name ?? "User");
       setViewAvatar((prof as any)?.avatar_url ?? null);
       setViewAllowRatings(Boolean((prof as any)?.allow_ratings ?? true));
       setViewRatingAvg(Number((prof as any)?.rating_avg ?? 0));
       setViewRatingCount(Number((prof as any)?.rating_count ?? 0));
 
-      // Prefill my existing rating + window status
-      await loadPairStatus(viewUserId!);
+      // 2. My Rating of them
+      const { data: pair } = await supabase
+        .from('rating_pairs')
+        .select('stars')
+        .eq('rater_id', uid)
+        .eq('ratee_id', viewUserId)
+        .maybeSingle();
+      setMyRating(Number(pair?.stars ?? 0));
 
-      // Load friend status
+      // 3. Friend Status
       const { data: rel } = await supabase
         .from("friendships")
-        .select("id,user_id_a,user_id_b,status,requested_by")
+        .select("status,requested_by")
         .or(`and(user_id_a.eq.${uid},user_id_b.eq.${viewUserId}),and(user_id_a.eq.${viewUserId},user_id_b.eq.${uid})`)
-        .limit(1)
         .maybeSingle();
 
       let st: FriendState = 'none';
@@ -129,86 +89,93 @@ export default function ViewOtherProfileModal({ isOpen, onClose, viewUserId }: V
         }
       }
       setViewFriendStatus(st);
+
+      // 4. Group Stats (Total & Mutual)
+      // Get all groups for target user
+      const { data: targetGroups } = await supabase
+        .from("group_members")
+        .select("group_id")
+        .eq("user_id", viewUserId)
+        .eq("status", "active");
+      
+      const targetGroupIds = (targetGroups || []).map((r: any) => r.group_id);
+      setTotalGroups(targetGroupIds.length);
+
+      if (targetGroupIds.length > 0) {
+         const { data: tgDetails } = await supabase
+           .from("groups")
+           .select("title")
+           .in("id", targetGroupIds)
+           .limit(12);
+         setTargetGroupNames((tgDetails || []).map((g: any) => g.title));
+      } else {
+         setTargetGroupNames([]);
+      }
+
+      // Get all groups for ME
+      const { data: myGroups } = await supabase
+        .from("group_members")
+        .select("group_id")
+        .eq("user_id", uid)
+        .eq("status", "active");
+        
+      const myGroupIds = new Set((myGroups || []).map((r: any) => r.group_id));
+
+      // Find intersection (Mutual)
+      const mutualIds = targetGroupIds.filter(gid => myGroupIds.has(gid));
+      setMutualGroupsCount(mutualIds.length);
+
+      if (mutualIds.length > 0) {
+          const { data: mutualDetails } = await supabase
+            .from("groups")
+            .select("title")
+            .in("id", mutualIds)
+            .limit(3); // Limit names to display
+          setMutualGroupNames((mutualDetails || []).map((g: any) => g.title));
+      } else {
+          setMutualGroupNames([]);
+      }
     }
     
     loadData();
-    
   }, [isOpen, viewUserId, uid]);
   
   // --- Actions ---
 
-  async function sendFriendRequest() {
-    if (!viewUserId) return;
-    try {
-      const { error: rpcErr } = await supabase.rpc("request_friend", { target_id: viewUserId });
-      if (rpcErr) throw rpcErr;
-      setViewFriendStatus('pending_out');
-      success('Friend request sent');
-    } catch (e: any) {
-      error(e?.message || 'Could not send friend request');
-    }
-  }
-
-  async function acceptFriend() {
-    if (!viewUserId) return;
-    try {
-      const { error: rpcErr } = await supabase.rpc("accept_friend", { from_id: viewUserId });
-      if (rpcErr) throw rpcErr;
-      setViewFriendStatus('accepted');
-      success('Friend request accepted');
-    } catch (e: any) {
-      error(e?.message || 'Could not accept friend request');
-    }
-  }
-
-  async function removeFriend() {
-    if (!viewUserId) return;
-    try {
-      const { error: rpcErr } = await supabase.rpc("remove_friend", { other_id: viewUserId });
-      if (rpcErr) throw rpcErr;
-      setViewFriendStatus('none');
-      success('Removed');
-    } catch (e: any) {
-      error(e?.message || 'Could not remove friend');
-    }
+  async function handleFriendAction(action: 'add' | 'accept' | 'remove') {
+     if (!viewUserId) return;
+     try {
+        if (action === 'add') {
+            await supabase.rpc("request_friend", { target_id: viewUserId });
+            setViewFriendStatus('pending_out');
+        } else if (action === 'accept') {
+            await supabase.rpc("accept_friend", { from_id: viewUserId });
+            setViewFriendStatus('accepted');
+        } else {
+            await supabase.rpc("remove_friend", { other_id: viewUserId });
+            setViewFriendStatus('none');
+        }
+     } catch (e) { console.error(e); }
   }
 
   async function rateUser(n: number) {
-    if (!uid || !viewUserId || rateBusy) return;
-    if (!(cooldownSecs === 0 || canEditOnce)) return;
-
-    const v = Math.max(1, Math.min(6, Math.round(n)));
+    if (!uid || !viewUserId || rateBusy || !viewAllowRatings) return;
     setRateBusy(true);
     const prev = myRating;
-    setMyRating(v);
-    
+    setMyRating(n);
     try {
-      const { error: rpcErr } = await supabase.rpc('submit_rating', { p_ratee: viewUserId, p_stars: v });
-      if (rpcErr) throw rpcErr;
-
-      // Reload pair status and aggregates
-      await loadPairStatus(viewUserId);
-      const { data: agg } = await supabase
-        .from('profiles')
-        .select('rating_avg,rating_count')
-        .eq('user_id', viewUserId)
-        .maybeSingle();
-      if (agg) {
-        setViewRatingAvg(Number((agg as any).rating_avg ?? 0));
-        setViewRatingCount(Number((agg as any).rating_count ?? 0));
+      const { error } = await supabase.rpc('submit_rating', { p_ratee: viewUserId, p_stars: n });
+      if (error) throw error;
+      
+      // Refresh avg
+      const { data } = await supabase.from('profiles').select('rating_avg,rating_count').eq('user_id', viewUserId).single();
+      if (data) {
+          setViewRatingAvg(data.rating_avg);
+          setViewRatingCount(data.rating_count);
       }
     } catch (e: any) {
       setMyRating(prev);
-      const msg = String(e?.message || '');
-      if (/rate_cooldown_active/i.test(msg)) {
-        setErr('You already used your one edit for this 14‑day window.');
-      } else if (/invalid_stars/i.test(msg)) {
-        setErr('Rating must be between 1 and 6.');
-      } else if (/not_authenticated/i.test(msg)) {
-        setErr('Please sign in to rate.');
-      } else {
-        setErr('Rating failed.');
-      }
+      setErr(e.message?.includes('weekly') ? "You can only rate once per week." : "Failed to rate.");
     } finally {
       setRateBusy(false);
     }
@@ -217,89 +184,141 @@ export default function ViewOtherProfileModal({ isOpen, onClose, viewUserId }: V
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/40">
-      <div className="w-[560px] max-w-[92vw] rounded-2xl border border-black/10 bg-white p-5 shadow-xl">
-        <div className="mb-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-12 w-12 rounded-full bg-neutral-200 grid place-items-center overflow-hidden">
-              {viewAvatar ? (
-                <img src={viewAvatar} alt="" className="h-12 w-12 rounded-full object-cover" />
-              ) : (
-                <span className="text-sm font-medium">{(viewName || '').slice(0,2).toUpperCase()}</span>
-              )}
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <div className="text-base font-semibold text-neutral-900">{viewName}</div>
-                <div className="flex items-center text-neutral-800">
-                  <div className="flex items-center gap-2">
-                    {Array.from({ length: 6 }).map((_, idx) => {
-                      const n = idx + 1; // 1..6
-                      const active = (hoverRating ?? myRating) >= n;
-                      return (
-                        <button
-                          key={n}
-                          type="button"
-                          disabled={!viewAllowRatings || rateBusy}
-                          onMouseEnter={() => setHoverRating(n)}
-                          onMouseLeave={() => setHoverRating(null)}
-                          onClick={() => rateUser(n)}
-                          className={`text-lg leading-none ${
-                            (!viewAllowRatings || rateBusy)
-                              ? 'opacity-40 cursor-not-allowed'
-                              : 'hover:scale-110 transition-transform'
-                          } ${active ? 'text-emerald-600' : 'text-neutral-400'}`}
-                          aria-label={`Give ${n} star${n > 1 ? 's' : ''}`}
-                          title={viewAllowRatings ? `${n} / 6` : 'Ratings disabled'}
-                        >
-                          {active ? '★' : '☆'}
-                        </button>
-                      );
-                    })}
-                    <span className="ml-1 text-[11px] text-neutral-500">({viewRatingCount})</span>
-                  </div>
-                </div>
-              </div>
-              <div className="text-xs text-neutral-600">{viewUserId}</div>
-            </div>
-          </div>
-          <button onClick={onClose} className="rounded-md border border-black/10 px-2 py-1 text-sm">Close</button>
-        </div>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      
+      <div className="relative w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl ring-1 ring-black/5 overflow-hidden">
         
-        {err && <div className="mb-2 text-xs text-red-600">{err}</div>}
-
-        <div className="space-y-3">
-          <div className="rounded-md border border-black/10 p-3 text-sm">
-            <div className="mb-2 font-medium text-neutral-800">Friend status</div>
-            {viewFriendStatus === 'accepted' && (
-              <div className="flex items-center gap-2">
-                <span className="text-emerald-700">You are friends.</span>
-                <button
-                  onClick={removeFriend}
-                  className="ml-2 rounded-md border border-black/10 px-3 py-1.5 text-sm"
-                >
-                  Remove
-                </button>
-              </div>
-            )}
-            {viewFriendStatus === 'pending_in' && (
-              <div className="flex items-center gap-2">
-                <span className="text-neutral-700">This user sent you a request.</span>
-                <button
-                  onClick={acceptFriend}
-                  className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm text-white"
-                >Accept</button>
-              </div>
-            )}
-            {viewFriendStatus === 'pending_out' && <div className="text-neutral-700">You sent a friend request.</div>}
-            {viewFriendStatus === 'none' && (
-              <button
-                onClick={sendFriendRequest}
-                className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm text-white"
-              >Add Friend</button>
-            )}
-          </div>
+        {/* Header / Avatar */}
+        <div className="flex flex-col items-center mb-6">
+            <div className="h-20 w-20 rounded-full bg-gradient-to-br from-neutral-100 to-neutral-200 p-1 mb-3 shadow-inner">
+               {viewAvatar ? (
+                   <img src={viewAvatar} className="h-full w-full rounded-full object-cover bg-white" alt={viewName} />
+               ) : (
+                   <div className="h-full w-full rounded-full bg-white flex items-center justify-center text-2xl font-bold text-neutral-400">
+                       {viewName.slice(0,1).toUpperCase()}
+                   </div>
+               )}
+            </div>
+            <h2 className="text-xl font-bold text-neutral-900">{viewName}</h2>
+            <div className="flex items-center gap-1 mt-1">
+                 {/* Star Rating Display */}
+                 <div className="flex text-amber-400 text-sm">
+                    {Array.from({length:6}).map((_,i) => (
+                        <span key={i} className={i < Math.round(viewRatingAvg) ? "fill-current" : "text-neutral-200"}>★</span>
+                    ))}
+                 </div>
+                 <span className="text-xs text-neutral-400">({viewRatingCount})</span>
+            </div>
         </div>
+
+        {/* Stats Grid */}
+        <div className="grid grid-cols-2 gap-3 mb-6">
+            <div className="bg-neutral-50 rounded-2xl p-3 text-center border border-neutral-100">
+                <div className="text-2xl font-bold text-neutral-900">{totalGroups}</div>
+                <div className="text-[10px] uppercase font-bold text-neutral-400 flex items-center justify-center gap-1">
+                    <Calendar className="h-3 w-3" /> Total Groups
+                </div>
+            </div>
+            <div className="bg-blue-50 rounded-2xl p-3 text-center border border-blue-100">
+                <div className="text-2xl font-bold text-blue-600">{mutualGroupsCount}</div>
+                <div className="text-[10px] uppercase font-bold text-blue-400 flex items-center justify-center gap-1">
+                    <Users className="h-3 w-3" /> In Common
+                </div>
+            </div>
+        </div>
+
+        {/* All Groups They Joined */}
+        <div className="mb-6 bg-neutral-50 rounded-xl p-3 border border-neutral-100">
+          <div className="text-[10px] font-bold text-neutral-400 uppercase mb-2">
+            Groups they joined:
+          </div>
+
+          {targetGroupNames.length === 0 ? (
+            <div className="text-xs text-neutral-400">No groups found.</div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {targetGroupNames.map((name, i) => (
+                <span key={i} className="px-2 py-0.5 bg-white border border-neutral-200 rounded-md text-xs font-medium text-neutral-700">
+                  {name}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Mutual Groups List (Small Preview) */}
+        {mutualGroupNames.length > 0 && (
+            <div className="mb-6 bg-neutral-50 rounded-xl p-3 border border-neutral-100">
+                <div className="text-[10px] font-bold text-neutral-400 uppercase mb-2">You are both in:</div>
+                <div className="flex flex-wrap gap-1.5">
+                    {mutualGroupNames.map((name, i) => (
+                        <span key={i} className="px-2 py-0.5 bg-white border border-neutral-200 rounded-md text-xs font-medium text-neutral-700">
+                            {name}
+                        </span>
+                    ))}
+                    {mutualGroupsCount > 3 && (
+                        <span className="px-2 py-0.5 text-xs text-neutral-400">+{mutualGroupsCount - 3} more</span>
+                    )}
+                </div>
+            </div>
+        )}
+
+        {/* Actions */}
+        <div className="space-y-3">
+             {/* Friend Action Button */}
+             {viewFriendStatus === 'none' && (
+                 <button onClick={() => handleFriendAction('add')} className="w-full py-2.5 rounded-xl bg-black text-white text-sm font-bold shadow-lg active:scale-95 transition-all">
+                     Add Friend
+                 </button>
+             )}
+             {viewFriendStatus === 'pending_in' && (
+                 <button onClick={() => handleFriendAction('accept')} className="w-full py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-bold shadow-lg active:scale-95 transition-all">
+                     Accept Request
+                 </button>
+             )}
+             {viewFriendStatus === 'accepted' && (
+                 <button onClick={() => handleFriendAction('remove')} className="w-full py-2.5 rounded-xl border border-neutral-200 text-neutral-600 text-sm font-bold hover:bg-neutral-50 transition-all">
+                     Remove Friend
+                 </button>
+             )}
+             {viewFriendStatus === 'pending_out' && (
+                 <button disabled className="w-full py-2.5 rounded-xl bg-neutral-100 text-neutral-400 text-sm font-bold cursor-not-allowed">
+                     Request Sent
+                 </button>
+             )}
+
+             {/* Rating Area */}
+             {viewAllowRatings && viewFriendStatus !== 'blocked' && (
+                 <div className="pt-3 border-t border-neutral-100">
+                     <div className="text-center text-xs font-medium text-neutral-400 mb-2">Rate this player</div>
+                     <div className="flex justify-center gap-1">
+                        {Array.from({length:6}).map((_, i) => {
+                            const n = i + 1;
+                            const active = (hoverRating ?? myRating) >= n;
+                            return (
+                                <button
+                                    key={n}
+                                    disabled={rateBusy}
+                                    onMouseEnter={() => setHoverRating(n)}
+                                    onMouseLeave={() => setHoverRating(null)}
+                                    onClick={() => rateUser(n)}
+                                    className={`text-2xl transition-transform hover:scale-110 ${active ? "text-amber-400" : "text-neutral-200"}`}
+                                >
+                                    ★
+                                </button>
+                            );
+                        })}
+                     </div>
+                     {err && <div className="text-center text-[10px] text-red-500 mt-1">{err}</div>}
+                 </div>
+             )}
+        </div>
+
+        <button onClick={onClose} className="absolute top-4 right-4 p-2 rounded-full hover:bg-neutral-100 text-neutral-400 transition-colors">
+            ✕
+        </button>
+
       </div>
     </div>
   );

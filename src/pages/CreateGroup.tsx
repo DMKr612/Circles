@@ -214,8 +214,22 @@ async function refreshFriendData(userId: string) {
     && title.trim().length > 0
     && category
     && gameId
-    && capacity >= 3 && capacity <= 12
+    && capacity >= 3 && capacity <= 16
     && cityValid; // city required and must be in whitelist
+
+  const [step, setStep] = useState<number>(1);
+  const canNextFrom1 = title.trim().length > 0 && !!category && !!gameId;
+  const canNextFrom2 = cityValid && capacity >= 3 && capacity <= 16;
+
+  function goNext() {
+    if (step === 1 && !canNextFrom1) return;
+    if (step === 2 && !canNextFrom2) return;
+    setStep((prev) => Math.min(3, prev + 1));
+  }
+
+  function goBack() {
+    setStep((prev) => Math.max(1, prev - 1));
+  }
 
   function toggleInvite(id: string) {
     setInviteeIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -300,7 +314,7 @@ async function refreshFriendData(userId: string) {
     }
     const uid = u.user.id;
 
-    const cap = Math.max(3, Math.min(12, capacity));
+    const cap = Math.max(3, Math.min(16, capacity));
 
     // insert only columns that certainly exist; let triggers/defaults handle the rest
     const cleanedCity = (cityCanonical ?? null);
@@ -332,286 +346,370 @@ async function refreshFriendData(userId: string) {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 pb-12 pt-8">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Create a new Circle</h1>
-          <p className="mt-1 text-sm text-neutral-600">A small, calm space for the right people.</p>
+    <div className="min-h-screen bg-neutral-50">
+      <div className="mx-auto w-full max-w-xl px-4 pb-10 pt-6">
+        {/* Header */}
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Start a new Circle</h1>
+            <p className="mt-1 text-sm text-neutral-600">
+              A small, calm group for the right people. 3 quick steps.
+            </p>
+          </div>
+          <Link
+            to="/browse"
+            className="shrink-0 rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-100"
+          >
+            Back
+          </Link>
         </div>
-        <Link to="/browse" className="rounded-md border border-neutral-200 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50">Back</Link>
-      </div>
 
-      <div className="grid gap-6">
-        {/* Basics card */}
-        <section className="rounded-xl border bg-white p-5 shadow-sm">
-          <h2 className="mb-4 text-base font-medium text-neutral-800">Basics</h2>
-          {listsLoading && (<div className="text-sm text-neutral-500">Loading categories…</div>)}
-          <div className="grid gap-5">
-            {/* Title */}
-            <div>
-              <label className="block text-xs font-medium text-neutral-700">Title</label>
-              <input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g., Friday Night Hokm"
-                className="mt-1 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm outline-none shadow-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
-              />
-            </div>
-
-            {/* Category combobox */}
-            <div>
-              <label className="block text-xs font-medium text-neutral-700">Category</label>
-              <div className="relative mt-1">
-                <input
-                  value={catOpen ? catQuery : category || ""}
-                  onChange={(e) => { setCatOpen(true); setCatQuery(e.target.value); }}
-                  onFocus={() => setCatOpen(true)}
-                  placeholder="Search or choose category…"
-                  className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm outline-none shadow-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
-                  disabled={listsLoading}
-                />
-                {catOpen && (
-                  <div className="absolute z-10 mt-1 max-h-56 w-full overflow-auto rounded-lg border bg-white shadow">
-                    {catOptions.length === 0 && (
-                      <div className="px-3 py-2 text-sm text-neutral-500">No matches</div>
-                    )}
-                    {catOptions.map((label: string) => (
-                      <button
-                        key={label}
-                        type="button"
-                        onClick={() => {
-                          setCategory(label.toLowerCase());
-                          setCatOpen(false);
-                          setCatQuery("");
-                          if (!opts.some(o => o.category === label && o.id === gameId)) setGameId("");
-                        }}
-                        className="block w-full px-3 py-2 text-left text-sm hover:bg-neutral-50"
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Game/Activity combobox */}
-            <div>
-              <label className="block text-xs font-medium text-neutral-700">Game / Activity</label>
-              <div className="relative mt-1">
-                <input
-                  value={gameOpen ? gameQuery : (opts.find((o) => o.category.toLowerCase() === (category || "").toLowerCase() && o.id === gameId)?.label || "")}
-                  onChange={(e) => { setGameOpen(true); setGameQuery(e.target.value); }}
-                  onFocus={() => setGameOpen(true)}
-                  placeholder="Search or choose game/activity…"
-                  className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm outline-none shadow-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
-                  disabled={listsLoading || !(category && category.trim().length > 0)}
-                />
-                {gameOpen && (
-                  <div className="absolute z-10 mt-1 max-h-56 w-full overflow-auto rounded-lg border bg-white shadow">
-                    {gameOptions.length === 0 && (
-                      <div className="px-3 py-2 text-sm text-neutral-500">No matches</div>
-                    )}
-                    {gameOptions.map((o: Opt) => (
-                      <button
-                        key={o.id}
-                        type="button"
-                        onClick={() => { setGameId(o.id); setGameOpen(false); setGameQuery(""); }}
-                        className="block w-full px-3 py-2 text-left text-sm hover:bg-neutral-50"
-                      >
-                        {o.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* City (required) */}
-            <div className="relative">
-              <label className="block text-xs font-medium text-neutral-700">City <span className="text-red-600">*</span></label>
-              <input
-                value={city}
-                onChange={(e) => { setCity(e.target.value); setCityOpen(true); setCityIdx(-1); }}
-                onFocus={async () => { await loadCities(); setCityOpen(true); }}
-                onBlur={() => { setTimeout(() => setCityOpen(false), 120); setCityTouched(true); }}
-                onKeyDown={(e) => {
-                  if (!cityOpen) return;
-                  if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    setCityIdx((i) => Math.min(filteredCities.length - 1, i + 1));
-                  } else if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    setCityIdx((i) => Math.max(-1, i - 1));
-                  } else if (e.key === 'Enter') {
-                    if (cityIdx >= 0 && filteredCities[cityIdx]) {
-                      e.preventDefault();
-                      setCity(filteredCities[cityIdx]);
-                      setCityOpen(false);
-                    }
-                  }
-                }}
-                placeholder="Start typing… e.g., Offenburg"
-                className={[
-                  "mt-1 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm outline-none shadow-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30",
-                  cityTouched && !cityValid ? "border-red-400 focus:border-red-500" : ""
-                ].join(" ")}
-                aria-autocomplete="list"
-                aria-expanded={cityOpen}
-                aria-controls="city-suggest"
-                role="combobox"
-              />
-              {cityOpen && filteredCities.length > 0 && (
+        {/* Step indicator */}
+        <div className="mb-6 flex items-center justify-between text-xs font-medium text-neutral-600">
+          {[
+            { id: 1, label: "Basics" },
+            { id: 2, label: "Location" },
+            { id: 3, label: "Details" },
+          ].map((s) => {
+            const active = step === s.id;
+            const done = step > s.id;
+            return (
+              <div key={s.id} className="flex flex-1 items-center gap-2">
                 <div
-                  id="city-suggest"
-                  className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-neutral-200 bg-white shadow-lg"
-                  role="listbox"
+                  className={[
+                    "flex h-7 w-7 items-center justify-center rounded-full border text-[11px]",
+                    active
+                      ? "border-emerald-600 bg-emerald-600 text-white"
+                      : done
+                      ? "border-emerald-400 bg-emerald-50 text-emerald-700"
+                      : "border-neutral-300 bg-white text-neutral-500",
+                  ].join(" ")}
                 >
-                  {filteredCities.map((n, i) => (
-                    <button
-                      type="button"
-                      key={n + i}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => { setCity(n); setCityOpen(false); setCityIdx(-1); }}
-                      className={[
-                        "flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-emerald-50",
-                        i === cityIdx ? "bg-emerald-50" : ""
-                      ].join(" ")}
-                      role="option"
-                      aria-selected={i === cityIdx}
-                    >
-                      <span className="truncate">{n}</span>
-                    </button>
-                  ))}
+                  {s.id}
                 </div>
-              )}
-              {!cityValid && cityTouched && (
-                <p className="mt-1 text-xs text-red-600">Choose a city from suggestions.</p>
-              )}
-              {cityValid && cityTouched && cityCanonical !== city && (
-                <p className="mt-1 text-xs text-neutral-500">Using “{cityCanonical}”.</p>
-              )}
-            </div>
-
-            {/* Capacity (> 1) */}
-            <div>
-              <label className="block text-xs font-medium text-neutral-700">Capacity</label>
-              <input
-                type="number"
-                min={3}
-                max={12}
-                value={capacity}
-                onChange={(e) => setCapacity(Math.max(3, Math.min(12, Number(e.target.value || 3))))}
-                className="mt-1 w-32 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm outline-none shadow-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
-              />
-              <p className="mt-1 text-xs text-neutral-500">Between 3 and 12 people.</p>
-            </div>
-
-            {/* Description */}
-            <div>
-              <label className="block text-xs font-medium text-neutral-700">Description</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Tell people what this group is about…"
-                rows={4}
-                className="mt-1 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm outline-none shadow-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
-              />
-            </div>
-          </div>
-        </section>
-
-        {/* Invite friends card (temporarily disabled) */}
-        {false && (
-        <section className="rounded-xl border bg-white p-5 shadow-sm">
-          <h2 className="mb-4 text-base font-medium">Invite friends (optional)</h2>
-          <p className="mt-1 text-xs text-neutral-500">Pick people who fit this circle. If you have no friends yet, we show a few suggestions so you can try invites.</p>
-
-          {/* Search box */}
-          <div className="mb-3">
-            <input
-              value={inviteQuery}
-              onChange={(e) => setInviteQuery(e.target.value)}
-              placeholder="Search people by name…"
-              className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm outline-none shadow-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
-            />
-          </div>
-
-          {/* Your friends */}
-          <div className="mb-4">
-            {inviteeIds.length > 0 && (
-              <div className="mb-2 flex flex-wrap gap-2">
-                {inviteeIds.map((id) => {
-                  const f = friendsById.get(id);
-                  const label = (f?.display_name || id.slice(0,8));
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => toggleInvite(id)}
-                      className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs text-emerald-800 hover:bg-emerald-100"
-                    >
-                      <span className="inline-block h-4 w-4 rounded-full bg-neutral-200" style={{ backgroundImage: f?.avatar_url ? `url(${f.avatar_url})` : undefined, backgroundSize: 'cover', backgroundPosition: 'center' }} />
-                      {label}
-                      <span className="ml-1 text-neutral-500">×</span>
-                    </button>
-                  );
-                })}
+                <span className={active ? "text-neutral-900" : "text-neutral-500"}>{s.label}</span>
               </div>
-            )}
-            <div className="mb-2 text-xs font-medium text-neutral-700">
-              Your friends <span className="font-normal text-neutral-500">({filteredFriends.length})</span>
-             </div>
-            {friendsLoading && (<div className="text-sm text-neutral-500">Loading friends…</div>)}
-            {!friendsLoading && filteredFriends.length === 0 && (
-              <div className="text-sm text-neutral-500">No friends match your search.</div>
-            )}
-            {!friendsLoading && filteredFriends.length > 0 && (
-              <div>
-                <div className="mb-2 text-xs text-neutral-500">Selected: {inviteeIds.length}</div>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {filteredFriends.map((f) => (
-                    <button
-                      type="button"
-                      key={f.id}
-                      onClick={() => toggleInvite(f.id)}
-                      className={[
-                        'flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors',
-                        inviteeIds.includes(f.id) ? 'border-emerald-300 bg-emerald-50' : 'border-neutral-200 hover:bg-neutral-50'
-                      ].join(' ')}
-                    >
-                      <div className="h-6 w-6 shrink-0 rounded-full bg-neutral-200" style={{ backgroundImage: f.avatar_url ? `url(${f.avatar_url})` : undefined, backgroundSize: 'cover', backgroundPosition: 'center' }} />
-                      <span className="truncate">{f.display_name || f.id.slice(0, 8)}</span>
-                      <span className={[
-                        'ml-auto rounded-full px-2 py-0.5 text-[11px] font-medium',
-                        inviteeIds.includes(f.id) ? 'bg-emerald-100 text-emerald-800' : 'bg-neutral-100 text-neutral-600'
-                      ].join(' ')}>
-                        {inviteeIds.includes(f.id) ? 'Selected' : 'Invite'}
-                      </span>
-                    </button>
-                  ))}
+            );
+          })}
+        </div>
+
+        {/* Steps */}
+        <div className="space-y-4">
+          {step === 1 && (
+            <section className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
+              <h2 className="mb-3 text-sm font-semibold text-neutral-800">Basics</h2>
+              {listsLoading && (
+                <div className="mb-2 text-xs text-neutral-500">Loading categories…</div>
+              )}
+              <div className="space-y-4">
+                {/* Title */}
+                <div>
+                  <label className="block text-xs font-medium text-neutral-700">Title</label>
+                  <input
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="e.g., Friday Night Hokm"
+                    className="mt-1 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm outline-none shadow-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
+                  />
+                </div>
+
+                {/* Category combobox */}
+                <div>
+                  <label className="block text-xs font-medium text-neutral-700">Category</label>
+                  <div className="relative mt-1">
+                    <input
+                      value={catOpen ? catQuery : category || ""}
+                      onChange={(e) => {
+                        setCatOpen(true);
+                        setCatQuery(e.target.value);
+                      }}
+                      onFocus={() => setCatOpen(true)}
+                      placeholder="Search or choose category…"
+                      className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm outline-none shadow-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
+                      disabled={listsLoading}
+                    />
+                    {catOpen && (
+                      <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border bg-white shadow-lg">
+                        {catOptions.length === 0 && (
+                          <div className="px-3 py-2 text-sm text-neutral-500">No matches</div>
+                        )}
+                        {catOptions.map((label: string) => (
+                          <button
+                            key={label}
+                            type="button"
+                            onClick={() => {
+                              setCategory(label.toLowerCase());
+                              setCatOpen(false);
+                              setCatQuery("");
+                              if (!opts.some((o) => o.category === label && o.id === gameId)) setGameId("");
+                            }}
+                            className="block w-full px-3 py-2 text-left text-sm hover:bg-neutral-50"
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Game/Activity combobox */}
+                <div>
+                  <label className="block text-xs font-medium text-neutral-700">Game / Activity</label>
+                  <div className="relative mt-1">
+                    <input
+                      value={
+                        gameOpen
+                          ? gameQuery
+                          :
+                              opts.find(
+                                (o) =>
+                                  o.category.toLowerCase() === (category || "").toLowerCase() &&
+                                  o.id === gameId,
+                              )?.label || ""
+                      }
+                      onChange={(e) => {
+                        setGameOpen(true);
+                        setGameQuery(e.target.value);
+                      }}
+                      onFocus={() => setGameOpen(true)}
+                      placeholder="Search or choose game/activity…"
+                      className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm outline-none shadow-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
+                      disabled={listsLoading || !(category && category.trim().length > 0)}
+                    />
+                    {gameOpen && (
+                      <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border bg-white shadow-lg">
+                        {gameOptions.length === 0 && (
+                          <div className="px-3 py-2 text-sm text-neutral-500">No matches</div>
+                        )}
+                        {gameOptions.map((o: Opt) => (
+                          <button
+                            key={o.id}
+                            type="button"
+                            onClick={() => {
+                              setGameId(o.id);
+                              setGameOpen(false);
+                              setGameQuery("");
+                            }}
+                            className="block w-full px-3 py-2 text-left text-sm hover:bg-neutral-50"
+                          >
+                            {o.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            )}
-          </div>
-
-
-          {inviteeIds.length > 0 && (
-            <p className="mt-3 text-xs text-emerald-700">Invitees receive a notification and must accept.</p>
+            </section>
           )}
-        </section>
+
+          {step === 2 && (
+            <section className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
+              <h2 className="mb-3 text-sm font-semibold text-neutral-800">Location & size</h2>
+              <div className="space-y-4">
+                {/* City (required) */}
+                <div className="relative">
+                  <label className="block text-xs font-medium text-neutral-700">
+                    City <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    value={city}
+                    onChange={(e) => {
+                      setCity(e.target.value);
+                      setCityOpen(true);
+                      setCityIdx(-1);
+                    }}
+                    onFocus={async () => {
+                      await loadCities();
+                      setCityOpen(true);
+                    }}
+                    onBlur={() => {
+                      setTimeout(() => setCityOpen(false), 120);
+                      setCityTouched(true);
+                    }}
+                    onKeyDown={(e) => {
+                      if (!cityOpen) return;
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setCityIdx((i) => Math.min(filteredCities.length - 1, i + 1));
+                      } else if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setCityIdx((i) => Math.max(-1, i - 1));
+                      } else if (e.key === "Enter") {
+                        if (cityIdx >= 0 && filteredCities[cityIdx]) {
+                          e.preventDefault();
+                          setCity(filteredCities[cityIdx]);
+                          setCityOpen(false);
+                        }
+                      }
+                    }}
+                    placeholder="Start typing… e.g., Offenburg"
+                    className={[
+                      "mt-1 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm outline-none shadow-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30",
+                      cityTouched && !cityValid ? "border-red-400 focus:border-red-500" : "",
+                    ].join(" ")}
+                    aria-autocomplete="list"
+                    aria-expanded={cityOpen}
+                    aria-controls="city-suggest"
+                    role="combobox"
+                  />
+                  {cityOpen && filteredCities.length > 0 && (
+                    <div
+                      id="city-suggest"
+                      className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-neutral-200 bg-white shadow-lg"
+                      role="listbox"
+                    >
+                      {filteredCities.map((n, i) => (
+                        <button
+                          type="button"
+                          key={n + i}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setCity(n);
+                            setCityOpen(false);
+                            setCityIdx(-1);
+                          }}
+                          className={[
+                            "flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-emerald-50",
+                            i === cityIdx ? "bg-emerald-50" : "",
+                          ].join(" ")}
+                          role="option"
+                          aria-selected={i === cityIdx}
+                        >
+                          <span className="truncate">{n}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {!cityValid && cityTouched && (
+                    <p className="mt-1 text-xs text-red-600">Choose a city from suggestions.</p>
+                  )}
+                  {cityValid && cityTouched && cityCanonical !== city && (
+                    <p className="mt-1 text-xs text-neutral-500">Using “{cityCanonical}”.</p>
+                  )}
+                </div>
+
+
+                {/* Capacity (> 1) */}
+                <div>
+                  <label className="block text-xs font-medium text-neutral-700">Capacity</label>
+                  <div className="mt-1 flex items-center gap-3">
+                    <input
+                      type="number"
+                      value={capacity === 0 ? "" : capacity}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        if (raw === "") {
+                          setCapacity(0);
+                          return;
+                        }
+                        const num = Number(raw);
+                        setCapacity(num);
+                      }}
+                      placeholder="3–16"
+                      className="w-24 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm outline-none shadow-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
+                    />
+                  </div>
+
+                  {(capacity < 3 || capacity > 16) && capacity !== 0 && (
+                    <p className="text-xs text-red-600 mt-1">
+                      Capacity must be between 3 and 16.
+                    </p>
+                  )}
+                </div>
+
+              </div>
+          </section>
         )}
 
-        {/* Actions */}
-        <div className="flex items-center justify-end gap-2">
-          <Link to="/browse" className="rounded-md border px-3 py-1.5 text-sm hover:bg-black/[0.04]">Cancel</Link>
+        {step === 3 && (
+            <section className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
+              <h2 className="mb-3 text-sm font-semibold text-neutral-800">Details & preview</h2>
+              <div className="space-y-4">
+                {/* Description */}
+                <div>
+                  <label className="block text-xs font-medium text-neutral-700">Description</label>
+                  <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Tell people what this circle is about…"
+                    rows={4}
+                    className="mt-1 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm outline-none shadow-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
+                  />
+                </div>
+
+                {/* Summary card */}
+                <div className="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-700">
+                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                    Preview
+                  </div>
+                  <div className="text-sm font-semibold text-neutral-900">{title || "Untitled Circle"}</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-neutral-600">
+                    {category && (
+                      <span className="rounded-full bg-white px-2 py-0.5">{category}</span>
+                    )}
+                    {gameId && (
+                      <span className="rounded-full bg-white px-2 py-0.5">
+                        {opts.find((o) => o.id === gameId)?.label || gameId}
+                      </span>
+                    )}
+                    {cityCanonical && (
+                      <span className="rounded-full bg-white px-2 py-0.5 flex items-center gap-1">
+                        <span>📍</span>
+                        {cityCanonical}
+                      </span>
+                    )}
+                    <span className="rounded-full bg-white px-2 py-0.5">
+                      {capacity} spots
+                    </span>
+                  </div>
+                  {description && (
+                    <p className="mt-2 line-clamp-3 text-xs text-neutral-700">{description}</p>
+                  )}
+                </div>
+              </div>
+            </section>
+          )}
+        </div>
+
+        {/* Bottom actions */}
+        <div className="mt-6 flex items-center justify-between gap-3">
           <button
-            disabled={!canSubmit}
-            onClick={handleSubmit}
-            className="rounded-md bg-emerald-600 px-4 py-2 text-white shadow-sm hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 disabled:opacity-60"
+            type="button"
+            onClick={step === 1 ? () => navigate("/browse") : goBack}
+            className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-100"
           >
-            Create Group
+            {step === 1 ? "Cancel" : "Back"}
           </button>
+
+          <div className="flex gap-2">
+            {step < 3 && (
+              <button
+                type="button"
+                onClick={goNext}
+                disabled={
+                  (step === 1 && !canNextFrom1) ||
+                  (step === 2 && !canNextFrom2) ||
+                  listsLoading
+                }
+                className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
+              >
+                Next
+              </button>
+            )}
+
+            {step === 3 && (
+              <button
+                type="button"
+                disabled={!canSubmit}
+                onClick={handleSubmit}
+                className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
+              >
+                Create Circle
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
