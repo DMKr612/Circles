@@ -1156,7 +1156,7 @@ export default function Profile() {
                 <div className="mt-2 flex items-center gap-2">
                   <div ref={notifRef} className="relative">
                     <button
-                      onClick={() => setNotifOpen(v => !v)}
+                      onClick={() => navigate("/notifications")}
                       className="ml-2 inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1.5 text-sm hover:bg-black/[0.04]"
                       title="Notifications"
                       aria-label="Notifications"
@@ -1166,19 +1166,6 @@ export default function Profile() {
                         <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-white text-xs leading-none">{notifCount}</span>
                       )}
                     </button>
-                    {notifOpen && (
-                      <NotificationPopover
-                        incomingRequests={incomingRequests}
-                        groupInvites={groupInvites}
-                        groupNotifs={groupNotifs}
-                        uid={uid!}
-                        onAcceptFriend={acceptFriend}
-                        onRemoveFriend={removeFriend}
-                        onAcceptGroup={acceptGroupInvite}
-                        onDeclineGroup={declineGroupInvite}
-                        onOpenGroup={openGroup}
-                      />
-                    )}
                   </div>
                   <button
                     onClick={() => setSettingsOpen(true)}
@@ -1493,9 +1480,9 @@ export default function Profile() {
       {settingsOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40">
           <form
-            onSubmit={(e) => { e.preventDefault(); saveSettings(); }}
-            className="w-[560px] max-w-[92vw] rounded-2xl border border-black/10 bg-white p-5 shadow-xl"
-          >
+  onSubmit={(e) => { e.preventDefault(); saveSettings(); }}
+  className="w-[560px] max-w-[92vw] rounded-2xl border border-black/10 bg-white shadow-xl max-h-[90vh] overflow-hidden flex flex-col"
+>
             <div className="mb-4 flex items-center justify-between">
               <div className="text-base font-semibold text-neutral-900">Edit Profile</div>
               <button
@@ -1645,6 +1632,16 @@ export default function Profile() {
                 className={`rounded-md px-3 py-1.5 text-sm text-white ${settingsSaving ? "bg-neutral-400" : "bg-emerald-600 hover:bg-emerald-700"}`}
               >
                 {settingsSaving ? "Saving…" : "Save"}
+              </button>
+            </div>
+            {/* Logout Button */}
+            <div className="mt-6">
+              <button
+                type="button"
+                onClick={logout}
+                className="w-full rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 hover:bg-red-100"
+              >
+                Sign Out
               </button>
             </div>
           </form>
