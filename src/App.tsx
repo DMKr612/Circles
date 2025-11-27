@@ -25,6 +25,7 @@ import Layout from "@/components/Layout";
 
 
 // Pages (lazy imports)
+
 const BrowsePage = lazy(() => import("./pages/Browse"));
 const CreateGroup = lazy(() => import("./pages/CreateGroup"));
 const GroupDetail = lazy(() => import("./pages/GroupDetail"));
@@ -35,6 +36,7 @@ const MyGroups = lazy(() => import("./pages/groups/MyGroups"));
 const Onboarding = lazy(() => import("./pages/Onboarding"));
 const JoinByCode = lazy(() => import("./pages/JoinByCode"));
 const NotificationsPage = lazy(() => import("./pages/Notifications"));
+const Chats = lazy(() => import("./pages/Chats"));
 
 // ---- Route prefetch helpers (Step 1) ----
 const routePrefetchers: Record<string, () => void> = {
@@ -267,6 +269,7 @@ export default function App() {
                   <Route path="/group/:id" element={<GroupDetail />} />
                   <Route path="/groups/game/:game" element={<GroupsByGame />} />
                   <Route path="/groups/mine" element={<MyGroups />} />
+                  <Route path="/chats" element={<Chats />} />
                 </Route>
 
                 <Route path="/groups/:id" element={<GroupRedirect />} />

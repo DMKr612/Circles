@@ -128,6 +128,14 @@ export default function Profile() {
 
   const { data: profile, isLoading, error: profileError } = useProfile(uid ?? null);
 
+  // Sync groups created/joined from profile hook
+  useEffect(() => {
+    if (profile) {
+      setGroupsCreated(profile.groups_created || 0);
+      setGroupsJoined(profile.groups_joined || 0);
+    }
+  }, [profile]);
+
   // --- UI State ---
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -295,6 +303,38 @@ export default function Profile() {
   }
  
   // --- Data Loading Effects ---
+
+  // Load accepted friends
+  useEffect(() => {
+    if (!uid) return;
+
+    (async () => {
+      const { data: frs } = await supabase
+        .from("friendships")
+        .select("id,user_id_a,user_id_b,status")
+        .eq("status", "accepted")
+        .or(`user_id_a.eq.${uid},user_id_b.eq.${uid}`);
+
+      setFriends((frs as FriendShipRow[]) || []);
+
+      // Load their profile info
+      if (frs) {
+        const ids = frs.map(f => f.user_id_a === uid ? f.user_id_b : f.user_id_a);
+
+        const { data: profs } = await supabase
+          .from("profiles")
+          .select("user_id,name,avatar_url")
+          .in("user_id", ids);
+
+        const map = new Map();
+        profs?.forEach(p =>
+          map.set(p.user_id, { name: p.name, avatar_url: p.avatar_url })
+        );
+        setFriendProfiles(map);
+      }
+    })();
+  }, [uid]);
+
   // (Removed manual data-loading useEffect in favor of useProfile)
 
   // Realtime listener for DMs (removed)
@@ -695,7 +735,6 @@ export default function Profile() {
             </div>
             <div className="flex-1">
               <div className="text-lg font-semibold text-neutral-900">{headerName}</div>
-              {!viewingOther && <div className="text-sm text-neutral-600">{user?.email}</div>}
               <div
                 className="mt-1 flex items-center gap-3 text-sm text-neutral-700"
                 title={`${(headerRatingAvg ?? 0).toFixed(1)} / 6 from ${headerRatingCount ?? 0} ratings`}
@@ -714,6 +753,7 @@ export default function Profile() {
                   <button onClick={() => openProfileView(routeUserId!)} className="text-xs text-emerald-700 hover:underline">Rate</button>
                 )}
               </div>
+              {!viewingOther && <div className="text-sm text-neutral-600">{user?.email}</div>}
               {!viewingOther && (
                 <div className="mt-2 flex items-center gap-2">
                   <button
@@ -726,7 +766,42 @@ export default function Profile() {
               )}
             </div>
           </div>
-          {/* ...rest of component remains unchanged... */}
+          {/* --- Stats Section --- */}
+          <div className="grid grid-cols-3 gap-4">
+            <StatCard label="Groups Created" value={groupsCreated} onClick={() => navigate('/groups?filter=created')} />
+            <StatCard label="Groups Joined" value={groupsJoined} onClick={() => navigate('/groups?filter=joined')} />
+            <StatCard label="Games Played" value={gamesTotal} />
+          </div>
+
+          {/* --- Game Stats --- */}
+          <Card title="Game Activity" count={gameStats.length} empty="No game history yet.">
+            {gameStats.map(gs => (
+              <li key={gs.game} className="flex justify-between py-2">
+                <span className="font-medium text-neutral-900">{gs.game}</span>
+                <span className="text-neutral-600 text-sm">{gs.count}</span>
+              </li>
+            ))}
+          </Card>
+
+          {/* --- Friends List --- */}
+          <Card title="Friends" count={friends.length} empty="No friends yet.">
+            {friends.map(fr => {
+              const fid = fr.user_id_a === uid ? fr.user_id_b : fr.user_id_a;
+              const prof = friendProfiles.get(fid);
+              return (
+                <FriendRow
+                  key={fid}
+                  _otherId={fid}
+                  name={prof?.name || fid.slice(0,6)}
+                  avatarUrl={prof?.avatar_url ?? null}
+                  lastBody=""
+                  lastAt={new Date().toISOString()}
+                  unread={false}
+                  onView={() => openProfileView(fid)}
+                />
+              );
+            })}
+          </Card>
         </div>
         {/* --- DM Sidebar --- */}
         {/* DM Floating Button */}
@@ -743,14 +818,14 @@ export default function Profile() {
           >
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
 
-              <div className="mb-2 flex items-center justify-between">
+              <div className="relative mb-2">
                 <div className="text-base font-semibold text-neutral-900">Edit Profile</div>
                 <button
                   type="button"
                   onClick={() => setSettingsOpen(false)}
-                  className="rounded-md border border-black/10 px-2 py-1 text-sm"
+                  className="absolute top-3 right-3 text-neutral-500 hover:text-neutral-800 text-xl leading-none"
                 >
-                  Close
+                  ×
                 </button>
               </div>
 
@@ -942,43 +1017,41 @@ export default function Profile() {
                 <div>
                   <div className="flex items-center gap-2">
                     <div className="text-base font-semibold text-neutral-900">{viewName}</div>
-                    <div className="flex items-center text-neutral-800">
-                      <div className="flex items-center gap-2">
-                        {Array.from({ length: 6 }).map((_, idx) => {
-                          const n = idx + 1; // 1..6
-                          const active = (hoverRating ?? myRating) >= n;
-                          return (
-                            <button
-                              key={n}
-                              type="button"
-                              disabled={!viewAllowRatings || rateBusy}
-                              onMouseEnter={() => setHoverRating(n)}
-                              onMouseLeave={() => setHoverRating(null)}
-                              onClick={() => rateUser(n)}
-                              className={`text-lg leading-none ${
-                                (!viewAllowRatings || rateBusy)
-                                  ? 'opacity-40 cursor-not-allowed'
-                                  : 'hover:scale-110 transition-transform'
-                              } ${active ? 'text-emerald-600' : 'text-neutral-400'}`}
-                              aria-label={`Give ${n} star${n > 1 ? 's' : ''}`}
-                              title={viewAllowRatings ? `${n} / 6` : 'Ratings disabled'}
-                            >
-                              {active ? '★' : '☆'}
-                            </button>
-                          );
-                        })}
-                        <span className="ml-1 text-[11px] text-neutral-500">({viewRatingCount})</span>
-                      </div>
-                    </div>
                   </div>
                 </div>
               </div>
-              <button onClick={() => setViewOpen(false)} className="rounded-md border border-black/10 px-2 py-1 text-sm">Close</button>
             </div>
            
             {err && <div className="mb-2 text-xs text-red-600">{err}</div>}
 
             <div className="space-y-3">
+              {/* --- Rating Stars Block moved here --- */}
+              <div className="flex items-center gap-2 justify-center">
+                {Array.from({ length: 6 }).map((_, idx) => {
+                  const n = idx + 1; // 1..6
+                  const active = (hoverRating ?? myRating) >= n;
+                  return (
+                    <button
+                      key={n}
+                      type="button"
+                      disabled={!viewAllowRatings || rateBusy}
+                      onMouseEnter={() => setHoverRating(n)}
+                      onMouseLeave={() => setHoverRating(null)}
+                      onClick={() => rateUser(n)}
+                      className={`text-lg leading-none ${
+                        (!viewAllowRatings || rateBusy)
+                          ? 'opacity-40 cursor-not-allowed'
+                          : 'hover:scale-110 transition-transform'
+                      } ${active ? 'text-emerald-600' : 'text-neutral-400'}`}
+                      aria-label={`Give ${n} star${n > 1 ? 's' : ''}`}
+                      title={viewAllowRatings ? `${n} / 6` : 'Ratings disabled'}
+                    >
+                      {active ? '★' : '☆'}
+                    </button>
+                  );
+                })}
+                <span className="ml-1 text-[11px] text-neutral-500">({viewRatingCount})</span>
+              </div>
               {/* --- Extra Info: Groups & Shared Groups --- */}
               <div className="mt-4 rounded-md border border-black/10 p-3 text-sm space-y-2">
                 <div className="font-medium text-neutral-800">Group Activity</div>

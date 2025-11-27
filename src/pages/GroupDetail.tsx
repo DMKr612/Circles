@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, lazy, Suspense, type FormEvent } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, Link, useLocation } from "react-router-dom";
 
 import { supabase } from "@/lib/supabase";
 import type { Group, Message, Poll, PollOption, GroupMember } from "@/types";
@@ -12,6 +12,7 @@ export default function GroupDetail() {
   const { id = "" } = useParams<{ id: string }>();
   console.debug("[GroupDetail] route id =", id);
   const nav = useNavigate();
+  const location = useLocation();
 
   const [group, setGroup] = useState<Group | null>(null);
   const [loading, setLoading] = useState(true);
@@ -50,8 +51,7 @@ export default function GroupDetail() {
   // Create-vote modal state
   const [createOpen, setCreateOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("Schedule");
-  const [newOptions, setNewOptions] = useState(""); // one label per line
-
+  const [newOptions, setNewOptions] = useState<string>("");
   async function copyGroupCode() {
     if (!group?.code) return;
     try {
@@ -128,6 +128,11 @@ export default function GroupDetail() {
     })();
     return () => { ignore = true; };
   }, [id]);
+  useEffect(() => {
+    if (location.hash === '#chat') {
+      setChatOpen(true);
+    }
+  }, [location.hash]);
   useEffect(() => {
     let off = false;
     (async () => {
@@ -415,6 +420,14 @@ async function joinGroup() {
     const { data: auth } = await supabase.auth.getUser();
     if (!auth?.user) { setMsg("Please sign in."); nav("/login"); return; }
     if (!isHost) { setMsg("Only the host can create a vote."); return; }
+    // Auto-delete current ongoing voting before creating a new one
+    if (poll?.id) {
+      await supabase.from("group_polls").delete().eq("id", poll.id);
+      setPoll(null);
+      setOptions([]);
+      setCounts({});
+      setVotedCount(0);
+    }
     setNewTitle("Schedule");
     setNewOptions("");
     setCreateOpen(true);
@@ -463,6 +476,19 @@ async function joinGroup() {
     const ok = window.confirm("Delete this voting?");
     if (!ok) return;
 
+    // delete votes
+    await supabase
+      .from("group_votes")
+      .delete()
+      .eq("poll_id", poll.id);
+
+    // delete options
+    await supabase
+      .from("group_poll_options")
+      .delete()
+      .eq("poll_id", poll.id);
+
+    // delete poll
     const { error } = await supabase
       .from("group_polls")
       .delete()
@@ -470,6 +496,7 @@ async function joinGroup() {
 
     if (error) { setMsg(error.message); return; }
 
+    // reset UI
     setPoll(null);
     setOptions([]);
     setCounts({});
@@ -632,9 +659,15 @@ return (
                 )}
               </div>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2 w-full sm:w-auto">
+                <button
+                  onClick={() => { setChatOpen(true); setChatFull(true); }}
+                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  💬 Chat
+                </button>
                 {!isMember && (
                   <button onClick={joinGroup} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">Join</button>
-                )}
+                )} 
                 {isMember && me !== group!.host_id && (
                   <button onClick={leaveGroup} className="rounded-lg border border-black/10 bg-white px-3 py-1.5 text-sm font-medium hover:bg-black/[0.04]">Leave</button>
                 )}
@@ -710,7 +743,16 @@ return (
                 <ul className="mt-3 space-y-2">
                   {options.map((o) => (
                     <li key={o.id} className="flex items-center justify-between rounded-xl border border-black/10 px-3 py-2 bg-neutral-50">
-                      <div><div className="font-medium text-neutral-900">{o.label}</div></div>
+                      <div>
+                        <a
+                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(o.label)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+                        >
+                          {o.label}
+                        </a>
+                      </div>
                       <div className="flex items-center gap-3">
                         <span className="text-xs text-neutral-600">{counts[o.id] ?? 0} votes</span>
                         <button
@@ -741,17 +783,69 @@ return (
   </div>
 
     {createOpen && (
-      <div className="fixed inset-0 z-50">
-        <div className="absolute inset-0 bg-black/50" onClick={() => setCreateOpen(false)} />
-        <div className="absolute left-1/2 top-1/2 w-[min(92vw,600px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-5 shadow-xl dark:bg-neutral-900">
-          <h3 className="text-lg font-semibold">Create Voting</h3>
-          <label className="mt-3 block text-sm">Title</label>
-          <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} className="mt-1 w-full rounded border border-black/10 px-3 py-2 text-sm dark:border-white/10 dark:bg-neutral-800 dark:text-gray-100" />
-          <label className="mt-3 block text-sm">Options (one per line)</label>
-          <textarea value={newOptions} onChange={(e) => setNewOptions(e.target.value)} rows={6} placeholder={"Sat 19:00 @ Tacheles\nSun 18:00 @ Niko Club"} className="mt-1 w-full rounded border border-black/10 px-3 py-2 text-sm dark:border-white/10 dark:bg-neutral-800 dark:text-gray-100" />
-          <div className="mt-4 flex justify-end gap-2">
-            <button type="button" onClick={() => setCreateOpen(false)} className="rounded-md border px-3 py-1.5 text-sm">Cancel</button>
-            <button type="button" onClick={confirmCreateVoting} className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm text-white">Create</button>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="w-[92vw] max-w-[500px] rounded-2xl bg-white p-5 shadow-xl animate-fadeIn">
+          
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xl font-bold text-neutral-900">Create a Vote</h3>
+            <button
+              onClick={() => setCreateOpen(false)}
+              className="text-neutral-400 hover:text-neutral-600"
+            >
+              ✕
+            </button>
+          </div>
+
+          <label className="text-sm font-medium text-neutral-700">Vote Title</label>
+          <input
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            placeholder="e.g. Pick a Time"
+            className="mt-1 mb-4 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500"
+          />
+
+          <div className="space-y-3">
+            {newOptions.split("\n").map((opt, index) => (
+              <div key={index} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={opt}
+                  onChange={(e) => {
+                    const arr = newOptions.split("\n");
+                    arr[index] = e.target.value;
+                    setNewOptions(arr.join("\n"));
+                  }}
+                  placeholder="e.g. Starbucks — 19:00"
+                  className="flex-1 rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500"
+                />
+                <button
+                  onClick={() => {
+                    const arr = newOptions.split("\n").filter((_, i) => i !== index);
+                    setNewOptions(arr.join("\n"));
+                  }}
+                  className="text-neutral-400 hover:text-red-500"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+
+            <button
+              onClick={() => setNewOptions((prev) => (prev ? prev + "\n" : ""))}
+              className="mt-2 w-full rounded-xl border border-neutral-200 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
+            >
+              ➕ Add Option
+            </button>
+          </div>
+
+
+          <div className="mt-6 flex justify-end">
+            <button
+              onClick={confirmCreateVoting}
+              className="rounded-xl bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-700"
+            >
+              Create Vote
+            </button>
           </div>
         </div>
       </div>

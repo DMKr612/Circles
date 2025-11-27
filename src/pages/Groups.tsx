@@ -194,19 +194,6 @@ export default function GroupsPage() {
                         </div>
                       </div>
                     </Link>
-                    {typeof unreadCounts[g.id] === "number" && unreadCounts[g.id]! > 0 && (
-                      <button
-                        onClick={(ev) => {
-                          ev.preventDefault();
-                          ev.stopPropagation();
-                          markGroupRead(g.id);
-                        }}
-                        className="ml-2 shrink-0 rounded-md border border-black/10 bg-white px-2.5 py-1 text-xs hover:bg-black/[0.04]"
-                        title="Mark as read"
-                      >
-                        Read
-                      </button>
-                    )}
                   </div>
                 </li>
               ))}
