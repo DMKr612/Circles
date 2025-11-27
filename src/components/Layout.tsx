@@ -1,4 +1,3 @@
-// src/components/Layout.tsx
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { Compass, MessageSquare, Users, Bell, User } from "lucide-react";
 
@@ -6,44 +5,52 @@ export default function Layout() {
   const location = useLocation();
   const active = location.pathname;
 
-  // Helper to determine active state color
+  // Helper for styling:
+  // - 'transition-transform duration-150': Smooth movement
+  // - 'active:scale-90': The click animation (shrinks icon when pressed)
   const getLinkClass = (path: string) => 
-    `flex flex-col items-center p-2 transition-colors ${
-      active === path ? 'text-black' : 'text-gray-400 hover:text-gray-600'
+    `flex flex-col items-center p-2 transition-transform duration-150 ease-in-out active:scale-90 ${
+      active === path ? 'text-black scale-105 font-semibold' : 'text-gray-400 hover:text-gray-600'
     }`;
 
   return (
     <>
       {/* Main content wrapper */}
-      <div className="pb-24"> {/* Increased padding so content is never hidden */}
+      <div className="pb-24"> 
         <Outlet />
       </div>
 
       {/* Bottom Navigation Bar */}
-      <nav className="fixed bottom-0 left-0 right-0 z-[100] border-t border-gray-200 bg-white/90 backdrop-blur-lg safe-area-pb">
+      <nav className="fixed bottom-0 left-0 right-0 z-[100] border-t border-gray-200 bg-white/95 backdrop-blur-lg safe-area-pb">
         <div className="mx-auto flex h-16 max-w-md items-center justify-around px-2">
           
+          {/* 1. Chats (Left) */}
+          <Link to="/chats" className={getLinkClass('/chats')}>
+             <MessageSquare className="h-6 w-6" />
+             <span className="text-[10px] font-medium">Chats</span>
+          </Link>
+
+          {/* 2. My Groups */}
+          <Link to="/groups" className={getLinkClass('/groups')}>
+            <Users className="h-6 w-6" />
+            <span className="text-[10px] font-medium">Groups</span>
+          </Link>
+
+          {/* 3. Browse (Center - Featured) */}
           <Link to="/" className={getLinkClass('/')}>
-            <Compass className="h-6 w-6" />
+            <div className={`rounded-full p-1 -mt-1 transition-colors ${active === '/' ? 'bg-gray-100' : ''}`}>
+                <Compass className="h-7 w-7" /> 
+            </div>
             <span className="text-[10px] font-medium">Browse</span>
           </Link>
 
-          <Link to="/groups" className={getLinkClass('/groups')}>
-            <Users className="h-6 w-6" />
-            <span className="text-[10px] font-medium">My Groups</span>
-          </Link>
-
-          {/* Placeholder for future feature */}
-          <div className="flex flex-col items-center p-2 text-gray-300">
-             <MessageSquare className="h-6 w-6" />
-             <span className="text-[10px] font-medium">Chats</span>
-          </div>
-
+          {/* 4. Activity */}
           <Link to="/notifications" className={getLinkClass('/notifications')}>
             <Bell className="h-6 w-6" />
             <span className="text-[10px] font-medium">Activity</span>
           </Link>
 
+          {/* 5. Profile */}
           <Link to="/profile" className={getLinkClass('/profile')}>
             <User className="h-6 w-6" />
             <span className="text-[10px] font-medium">Profile</span>

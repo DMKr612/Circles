@@ -253,7 +253,7 @@ export default function App() {
               }
             >
               <Routes>
-                <Route path="/" element={<Navigate to="/onboarding" replace />} />
+                <Route path="/" element={<Navigate to="/browse" replace />} />
                 <Route path="/onboarding" element={<Onboarding />} />
                 <Route path="/invite/:code" element={<JoinByCode />} />
 

@@ -5,7 +5,9 @@ import App from './App'
 import './index.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <BrowserRouter basename="/Circles">
-    <App />
-  </BrowserRouter>
+  <React.StrictMode>
+    <BrowserRouter basename="/Circles">
+      <App />
+    </BrowserRouter>
+  </React.StrictMode>
 )
