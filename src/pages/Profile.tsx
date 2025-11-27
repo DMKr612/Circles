@@ -1,8 +1,8 @@
 import React, { useEffect, useLayoutEffect, useMemo, useState, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { useProfile } from "../../hooks/useProfile";
-import { useAuth } from "../../App";
+import { Link, useNavigate, useParams, useLocation } from "react-router-dom";
+import { useProfile } from "../hooks/useProfile";
+import { useAuth } from "@/App";
 
 
 // Demo stubs for toast calls (prevents red lines if Toaster is removed)
@@ -126,7 +126,7 @@ export default function Profile() {
   const { user } = useAuth();
   const uid = user?.id;
 
-  const { data: profile, isLoading, error } = useProfile(uid);
+  const { data: profile, isLoading, error: profileError } = useProfile(uid ?? null);
 
   // --- UI State ---
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -154,6 +154,14 @@ export default function Profile() {
   const [avatarUploading, setAvatarUploading] = useState(false);
 
   // --- DM / Chat state --- (removed)
+  const [threads, setThreads] = useState<Thread[]>([]);
+  const [dmTargetId, setDmTargetId] = useState<string | null>(null);
+  const [dmMsgs, setDmMsgs] = useState<DMMessage[]>([]);
+  const [dmLoading, setDmLoading] = useState(false);
+  const [dmError, setDmError] = useState<string | null>(null);
+  const [dmInput, setDmInput] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
 
   // --- Stats ---
   const [groupsCreated, setGroupsCreated] = useState<number>(0);
@@ -360,7 +368,7 @@ export default function Profile() {
         const other = prev.find(t => t.other_id === dmTargetId);
         const rest = prev.filter(t => t.other_id !== dmTargetId);
         const updated = {
-            ...(other || { other_id: dmTargetId, name: dmDisplay.name, avatar_url: dmDisplay.avatar, unread: false }),
+            ...(other || { other_id: dmTargetId, name: dmTargetId.slice(0,6), avatar_url: null, unread: false }),
             last_body: body,
             last_at: data ? data.created_at : new Date().toISOString(),
             last_from_me: true,
@@ -667,7 +675,7 @@ export default function Profile() {
     return <div className="flex h-screen items-center justify-center text-neutral-500">Loading...</div>;
   }
 
-  if (error || !profile) {
+  if (profileError || !profile) {
     return <div className="p-4 text-red-500">Failed to load profile.</div>;
   }
 
@@ -724,8 +732,7 @@ export default function Profile() {
         {/* DM Floating Button */}
       </div>
       {/* ...rest of modals and content remain unchanged... */}
-    </div>
-  );
+
 
       {/* --- Settings Modal --- */}
       {settingsOpen && (

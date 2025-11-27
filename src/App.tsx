@@ -55,7 +55,7 @@ function prefetchRoute(path: string) {
    ========================= */
 type AuthCtx = { user: User | null; loading: boolean };
 const AuthContext = createContext<AuthCtx>({ user: null, loading: true });
-function useAuth() {
+export function useAuth() {
   return useContext(AuthContext);
 }
 function AuthProvider({ children }: PropsWithChildren) {
