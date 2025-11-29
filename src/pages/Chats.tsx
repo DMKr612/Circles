@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, lazy, Suspense } from "react";
 import { supabase } from "@/lib/supabase";
 import { useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { MessageSquare, Users, User, ArrowLeft, Send, Search as SearchIcon, Filter } from "lucide-react";
 import Spinner from "@/components/ui/Spinner";
 import ViewOtherProfileModal from "@/components/ViewOtherProfileModal"; // 1. Import Modal
@@ -27,6 +28,7 @@ type DMMsg = {
 
 export default function Chats() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [me, setMe] = useState<string | null>(null);
   const [list, setList] = useState<ChatItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -113,6 +115,37 @@ export default function Chats() {
     }
     load();
   }, []);
+
+  // Auto-select DM if location.state?.openDmId is provided
+  useEffect(() => {
+    const openId = location.state?.openDmId;
+    if (openId && list.length > 0 && !selected) {
+      const found = list.find(i => i.id === openId && i.type === 'dm');
+      if (found) {
+        setSelected(found);
+      } else {
+        (async () => {
+          const { data: p } = await supabase
+            .from("profiles")
+            .select("name, avatar_url")
+            .eq("user_id", openId)
+            .single();
+          if (p) {
+            const newChat: ChatItem = {
+              type: "dm",
+              id: openId,
+              name: p.name || "User",
+              avatar_url: p.avatar_url,
+              subtitle: "Direct Message",
+            };
+            setList((prev) => [newChat, ...prev]);
+            setSelected(newChat);
+          }
+        })();
+      }
+      window.history.replaceState({}, "");
+    }
+  }, [location.state, list, selected]);
 
   // 2. Load DM Messages when a Friend is selected
   useEffect(() => {

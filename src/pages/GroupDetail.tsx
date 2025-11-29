@@ -52,6 +52,8 @@ export default function GroupDetail() {
   const [createOpen, setCreateOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("Schedule");
   const [newOptions, setNewOptions] = useState<string>("");
+  const [pollDuration, setPollDuration] = useState("24h");
+  const [customEndDate, setCustomEndDate] = useState<string>("");
   async function copyGroupCode() {
     if (!group?.code) return;
     try {
@@ -446,11 +448,15 @@ async function joinGroup() {
       .single();
     if (pErr || !created?.id) { setMsg(pErr?.message || "Failed to create poll"); return; }
 
-    const labels = (newOptions || "")
+    let labels = (newOptions || "")
       .split(/\r?\n/)
       .map(s => s.trim())
       .filter(Boolean)
       .slice(0, 20);
+
+    if (!labels.some(l => l.toLowerCase() === "not coming")) {
+      labels.push("Not Coming");
+    }
     if (labels.length) {
       const rows = labels.map(label => ({ poll_id: created.id, label }));
       const { error: oErr } = await supabase.from("group_poll_options").insert(rows);
@@ -469,6 +475,30 @@ async function joinGroup() {
     setOptions((opts as PollOption[]) || []);
     setCounts({});
     setTimeout(() => document.getElementById("polls")?.scrollIntoView({ behavior: "smooth" }), 0);
+  }
+
+  async function finalizePoll() {
+    if (!poll || !isHost) return;
+
+    const ok = window.confirm("End voting and count participants?");
+    if (!ok) return;
+
+    try {
+      setVotingBusy("closing");
+
+      const { error } = await supabase.rpc("resolve_poll", {
+        p_poll_id: poll.id,
+      });
+
+      if (error) throw error;
+
+      setPoll(prev => prev ? { ...prev, status: "closed" } : prev);
+      setMsg("Poll finalized and game stats updated!");
+    } catch (err: any) {
+      setMsg(err.message || "Error finalizing poll");
+    } finally {
+      setVotingBusy(null);
+    }
   }
 
   async function deleteVoting() {
@@ -725,6 +755,14 @@ return (
               {isHost && poll && (
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-neutral-600">Open</span>
+                  {poll.status === "open" && (
+                    <button
+                      onClick={finalizePoll}
+                      className="rounded-md bg-black text-white px-2 py-0.5 text-xs hover:bg-neutral-800"
+                    >
+                      End & Count Games
+                    </button>
+                  )}
                   <button
                     onClick={deleteVoting}
                     className="rounded-md border border-red-600 text-red-600 px-2 py-0.5 text-xs hover:bg-red-50"
@@ -783,70 +821,91 @@ return (
   </div>
 
     {createOpen && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-        <div className="w-[92vw] max-w-[500px] rounded-2xl bg-white p-5 shadow-xl animate-fadeIn">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-in fade-in duration-200">
+        <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl ring-1 ring-black/5">
           
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-bold text-neutral-900">Create a Vote</h3>
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="text-xl font-bold text-neutral-900">New Vote</h3>
             <button
               onClick={() => setCreateOpen(false)}
-              className="text-neutral-400 hover:text-neutral-600"
+              className="rounded-full p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600"
             >
-              ✕
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
             </button>
           </div>
 
-          <label className="text-sm font-medium text-neutral-700">Vote Title</label>
-          <input
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            placeholder="e.g. Pick a Time"
-            className="mt-1 mb-4 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500"
-          />
+          <div className="space-y-4">
+            {/* Title Input */}
+            <div>
+              <label className="block text-xs font-bold text-neutral-500 uppercase tracking-wide mb-1.5">Topic</label>
+              <input
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                placeholder="e.g. Where should we meet?"
+                className="w-full rounded-xl border-neutral-200 bg-neutral-50 px-4 py-2.5 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all outline-none"
+              />
+            </div>
 
-          <div className="space-y-3">
-            {newOptions.split("\n").map((opt, index) => (
-              <div key={index} className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={opt}
-                  onChange={(e) => {
-                    const arr = newOptions.split("\n");
-                    arr[index] = e.target.value;
-                    setNewOptions(arr.join("\n"));
-                  }}
-                  placeholder="e.g. Starbucks — 19:00"
-                  className="flex-1 rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500"
-                />
-                <button
-                  onClick={() => {
-                    const arr = newOptions.split("\n").filter((_, i) => i !== index);
-                    setNewOptions(arr.join("\n"));
-                  }}
-                  className="text-neutral-400 hover:text-red-500"
+            {/* Duration Selector */}
+            <div>
+              <label className="block text-xs font-bold text-neutral-500 uppercase tracking-wide mb-1.5">Duration</label>
+              <div className="flex gap-2">
+                <select
+                  value={pollDuration}
+                  onChange={(e) => setPollDuration(e.target.value)}
+                  className="flex-1 rounded-xl border-neutral-200 bg-neutral-50 px-4 py-2.5 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
                 >
-                  ✕
-                </button>
-              </div>
-            ))}
+                  <option value="1h">1 Hour</option>
+                  <option value="24h">24 Hours</option>
+                  <option value="48h">2 Days</option>
+                  <option value="custom">Custom Date...</option>
+                </select>
 
-            <button
-              onClick={() => setNewOptions((prev) => (prev ? prev + "\n" : ""))}
-              className="mt-2 w-full rounded-xl border border-neutral-200 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
-            >
-              ➕ Add Option
-            </button>
+                {pollDuration === "custom" && (
+                  <input
+                    type="datetime-local"
+                    value={customEndDate}
+                    onChange={(e) => setCustomEndDate(e.target.value)}
+                    className="flex-[1.5] rounded-xl border-neutral-200 bg-neutral-50 px-3 py-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* Options Input */}
+            <div>
+              <label className="block text-xs font-bold text-neutral-500 uppercase tracking-wide mb-1.5">Options</label>
+              <textarea
+                value={newOptions}
+                onChange={(e) => setNewOptions(e.target.value)}
+                rows={4}
+                placeholder={"Option 1\nOption 2\nOption 3"}
+                className="w-full rounded-xl border-neutral-200 bg-neutral-50 px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all outline-none resize-none"
+              />
+              <p className="mt-1.5 text-[10px] text-neutral-400 flex items-center gap-1">
+                <span>ℹ️</span> "Not Coming" is added automatically.
+              </p>
+            </div>
           </div>
 
-
-          <div className="mt-6 flex justify-end">
+          {/* Footer Actions */}
+          <div className="mt-6 flex items-center justify-end gap-3 pt-4 border-t border-neutral-100">
+            <button
+              onClick={() => setCreateOpen(false)}
+              className="rounded-xl px-5 py-2.5 text-sm font-bold text-neutral-500 hover:bg-neutral-50 transition-colors"
+            >
+              Cancel
+            </button>
             <button
               onClick={confirmCreateVoting}
-              className="rounded-xl bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-700"
+              className="rounded-xl bg-black px-6 py-2.5 text-sm font-bold text-white shadow-lg hover:bg-neutral-800 active:scale-95 transition-all"
             >
               Create Vote
             </button>
           </div>
+
         </div>
       </div>
     )}
