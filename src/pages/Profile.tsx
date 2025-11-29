@@ -3,7 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { Link, useNavigate, useParams, useLocation } from "react-router-dom";
 import { useProfile } from "../hooks/useProfile";
 import { useAuth } from "@/App";
-
+import ViewOtherProfileModal from "@/components/ViewOtherProfileModal";
 
 // Demo stubs for toast calls (prevents red lines if Toaster is removed)
 const success = (m?: string) => console.log("[ok]", m || "");
@@ -127,7 +127,9 @@ export default function Profile() {
   const uid = user?.id;
 
   const { data: profile, isLoading, error: profileError } = useProfile(uid ?? null);
+  
 
+  //
   // Sync groups created/joined from profile hook
   useEffect(() => {
     if (profile) {
@@ -418,57 +420,10 @@ export default function Profile() {
   }
  
   // --- View Other Profile Modal Functions ---
- 
-  async function openProfileView(otherId: string) {
-    if (viewOpen && viewUserId === otherId) return; // already open
-    setViewBusy(true);
-    setViewOpen(true);
+  function openProfileView(otherId: string) {
+    if (viewOpen && viewUserId === otherId) return; 
     setViewUserId(otherId);
-    setErr(null);
-    setRateBusy(false);
-    setHoverRating(null);
-
-    const { data: prof } = await supabase
-      .from("profiles")
-      .select("user_id,name,avatar_url,allow_ratings,rating_avg,rating_count")
-      .eq("user_id", otherId)
-      .maybeSingle();
-    setViewName((prof as any)?.name ?? otherId.slice(0,6));
-    setViewAvatar((prof as any)?.avatar_url ?? null);
-    setViewAllowRatings(Boolean((prof as any)?.allow_ratings ?? true));
-    setViewRatingAvg(Number((prof as any)?.rating_avg ?? 0));
-    setViewRatingCount(Number((prof as any)?.rating_count ?? 0));
-
-    // Prefill my existing rating + window status
-    await loadPairStatus(otherId);
-
-    // Load friend status
-    const { data: rel } = await supabase
-      .from("friendships")
-      .select("id,user_id_a,user_id_b,status,requested_by")
-      .or(`and(user_id_a.eq.${uid},user_id_b.eq.${otherId}),and(user_id_a.eq.${otherId},user_id_b.eq.${uid})`)
-      .limit(1)
-      .maybeSingle();
-
-    // Get their friend count
-    const { data: fr } = await supabase
-      .from('friendships')
-      .select('id')
-      .or(`user_id_a.eq.${otherId},user_id_b.eq.${otherId}`)
-      .eq('status', 'accepted');
-    setTheirFriendCount(fr?.length || 0);
-
-    type FriendState = 'none' | 'pending_in' | 'pending_out' | 'accepted' | 'blocked';
-    let st: FriendState = 'none';
-    if (rel) {
-      if (rel.status === 'accepted') st = 'accepted';
-      else if (rel.status === 'blocked') st = 'blocked';
-      else if (rel.status === 'pending') {
-        st = rel.requested_by === uid ? 'pending_out' : 'pending_in';
-      }
-    }
-    setViewFriendStatus(st);
-    setViewBusy(false);
+    setViewOpen(true);
   }
  
   // --- Notification Handlers ---
@@ -996,92 +951,11 @@ export default function Profile() {
       )}
 
       {/* --- View Other Profile Modal --- */}
-      {viewOpen && viewUserId && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40">
-          <div className="w-[95vw] sm:w-[480px] md:w-[560px] rounded-2xl border border-black/10 bg-white p-5 shadow-xl relative">
-            <button
-              onClick={() => setViewOpen(false)}
-              className="absolute top-3 right-3 text-neutral-500 hover:text-neutral-800 text-xl"
-            >
-              ×
-            </button>
-            <div className="mb-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="h-12 w-12 rounded-full bg-neutral-200 grid place-items-center overflow-hidden">
-                  {viewAvatar ? (
-                    <img src={viewAvatar} alt="" className="h-12 w-12 rounded-full object-cover" />
-                  ) : (
-                    <span className="text-sm font-medium">{(viewName || '').slice(0,2).toUpperCase()}</span>
-                  )}
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <div className="text-base font-semibold text-neutral-900">{viewName}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-           
-            {err && <div className="mb-2 text-xs text-red-600">{err}</div>}
-
-            <div className="space-y-3">
-              {/* --- Rating Stars Block moved here --- */}
-              <div className="flex items-center gap-2 justify-center">
-                {Array.from({ length: 6 }).map((_, idx) => {
-                  const n = idx + 1; // 1..6
-                  const active = (hoverRating ?? myRating) >= n;
-                  return (
-                    <button
-                      key={n}
-                      type="button"
-                      disabled={!viewAllowRatings || rateBusy}
-                      onMouseEnter={() => setHoverRating(n)}
-                      onMouseLeave={() => setHoverRating(null)}
-                      onClick={() => rateUser(n)}
-                      className={`text-lg leading-none ${
-                        (!viewAllowRatings || rateBusy)
-                          ? 'opacity-40 cursor-not-allowed'
-                          : 'hover:scale-110 transition-transform'
-                      } ${active ? 'text-emerald-600' : 'text-neutral-400'}`}
-                      aria-label={`Give ${n} star${n > 1 ? 's' : ''}`}
-                      title={viewAllowRatings ? `${n} / 6` : 'Ratings disabled'}
-                    >
-                      {active ? '★' : '☆'}
-                    </button>
-                  );
-                })}
-                <span className="ml-1 text-[11px] text-neutral-500">({viewRatingCount})</span>
-              </div>
-              {/* --- Extra Info: Groups & Shared Groups --- */}
-              <div className="mt-4 rounded-md border border-black/10 p-3 text-sm space-y-2">
-                <div className="font-medium text-neutral-800">Group Activity</div>
-
-                <div className="text-neutral-700">
-                  <b>Total groups joined:</b> {otherUserGamesTotal}
-                </div>
-
-                <div className="text-neutral-700">
-                  <b>Rating:</b> {viewRatingAvg.toFixed(1)} / 6  
-                  <span className="text-neutral-500"> ({viewRatingCount} ratings)</span>
-                </div>
-                <div className="text-neutral-700">
-                  <b>Total friends:</b> {theirFriendCount}
-                </div>
-
-                {/* Shared groups */}
-                <div className="mt-3">
-                  <div className="font-medium text-neutral-800">Groups you both joined:</div>
-                  {!uid || !viewUserId ? (
-                    <div className="text-neutral-600 text-sm">Loading…</div>
-                  ) : (
-                    <SharedGroups me={uid} other={viewUserId} />
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <ViewOtherProfileModal 
+        isOpen={viewOpen}
+        onClose={() => setViewOpen(false)}
+        viewUserId={viewUserId}
+      />
     </div>
   );
 }

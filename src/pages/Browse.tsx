@@ -122,23 +122,37 @@ export default function BrowsePage() {
   }, [cat, q, code, codeFromQ, reloadTick]);
 
   // Load Stats
+  // Load Stats
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const { data: gm } = await supabase.from("group_members").select("user_id, groups(game)");
+      // FIX: Added 'group_id' to selection so we can distinguish unique groups
+      const { data: gm } = await supabase.from("group_members").select("user_id, group_id, groups(game)");
       if (!mounted || !gm) return;
       
-      const gc: Record<string, number> = {};
-      const mc: Record<string, number> = {};
+      const uniqueGroups: Record<string, Set<string>> = {}; // To count unique groups
+      const mc: Record<string, number> = {}; // To count total members
       const users = new Set<string>();
 
       gm.forEach((r: any) => {
          const g = (r.groups?.game || "").toLowerCase();
-         if (g) {
-             gc[g] = (gc[g] || 0) + 1;
+         const gid = r.group_id;
+
+         if (g && gid) {
+             // 1. Member Count: Increment for every row
              mc[g] = (mc[g] || 0) + 1;
+
+             // 2. Group Count: Add ID to Set (automatically handles duplicates)
+             if (!uniqueGroups[g]) uniqueGroups[g] = new Set();
+             uniqueGroups[g].add(gid);
          }
          if (r.user_id) users.add(r.user_id);
+      });
+
+      // Convert Sets to numbers for the state
+      const gc: Record<string, number> = {};
+      Object.keys(uniqueGroups).forEach(k => {
+        gc[k] = uniqueGroups[k].size;
       });
 
       setGroupCountByGame(gc);
