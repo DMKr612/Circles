@@ -9,6 +9,12 @@ import {
 
 const ChatPanel = lazy(() => import("../components/ChatPanel"));
 
+// FIX: Extend the type locally to include avatar_url and prevent red lines
+interface MemberDisplay extends GroupMember {
+  name: string | null;
+  avatar_url: string | null;
+}
+
 export default function GroupDetail() {
   const { id = "" } = useParams<{ id: string }>();
   const nav = useNavigate();
@@ -27,6 +33,7 @@ export default function GroupDetail() {
   const [chatOpen, setChatOpen] = useState(false);
   const [chatFull, setChatFull] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(false); 
   
   // Edit Description State
   const [isEditingDesc, setIsEditingDesc] = useState(false);
@@ -42,7 +49,9 @@ export default function GroupDetail() {
   const [memberCount, setMemberCount] = useState<number>(0);
   const [votedCount, setVotedCount] = useState<number>(0);
   const [votingBusy, setVotingBusy] = useState<string | null>(null);
-  const [members, setMembers] = useState<GroupMember[]>([]);
+  
+  // FIX: Use the extended type here
+  const [members, setMembers] = useState<MemberDisplay[]>([]);
   const [isMember, setIsMember] = useState(false);
 
   // New Poll Form
@@ -109,24 +118,27 @@ export default function GroupDetail() {
       if (!group?.id) { setMembers([]); return; }
       const { data } = await supabase
         .from('group_members')
-        .select('user_id, role, created_at, status, group_id, profiles(user_id, name)')
+        .select('user_id, role, created_at, status, group_id, profiles(name, avatar_url)')
         .eq('group_id', group.id)
         .eq('status', 'active')
         .order('created_at', { ascending: true });
 
-      const arr = (data ?? []).map((r: any) => ({
+      // FIX: Map the profile data correctly to the extended type
+      const arr: MemberDisplay[] = (data ?? []).map((r: any) => ({
         user_id: r.user_id,
         role: r.role,
         created_at: r.created_at,
         group_id: group.id,
         status: 'active',
-        name: r.profiles?.name ?? null,
+        name: r.profiles?.name ?? "User",
+        avatar_url: r.profiles?.avatar_url ?? null
       }));
+
       if (off) return;
-      setMembers(arr as GroupMember[]);
+      setMembers(arr);
       
       const meId = (await supabase.auth.getUser()).data.user?.id || null;
-      if (meId) setIsMember(arr.some((a: any) => a.user_id === meId));
+      if (meId) setIsMember(arr.some((a) => a.user_id === meId));
     })();
     return () => { off = true; };
   }, [group?.id]);
@@ -140,7 +152,6 @@ export default function GroupDetail() {
       const { data: polls } = await supabase
         .from("group_polls").select("*")
         .eq("group_id", group.id)
-        .in("status", ["open", "closed"]) 
         .order("created_at", { ascending: false })
         .limit(1);
         
@@ -266,7 +277,11 @@ export default function GroupDetail() {
       .select("id")
       .single();
       
-    if (pErr || !created?.id) { setMsg("Failed to create poll"); return; }
+    if (pErr || !created?.id) { 
+        console.error(pErr);
+        setMsg("Failed to create poll. Check permissions."); 
+        return; 
+    }
 
     if (labels.length) {
       const rows = labels.map(label => ({ poll_id: created.id, label }));
@@ -302,8 +317,15 @@ export default function GroupDetail() {
   async function deleteVoting() {
     if (!poll) return;
     if (!window.confirm("Delete this voting?")) return;
-    await supabase.from("group_polls").delete().eq("id", poll.id);
-    setPoll(null);
+    // FIX: Add error handling for delete
+    const { error } = await supabase.from("group_polls").delete().eq("id", poll.id);
+    if (error) {
+        setMsg("Could not delete. Check database permissions.");
+        console.error(error);
+    } else {
+        setPoll(null);
+        setMsg("Poll deleted.");
+    }
   }
 
   async function castVote(optionId: string) {
@@ -375,7 +397,7 @@ export default function GroupDetail() {
                         </div>
                     </div>
 
-                    {/* Main Actions - CLEANED UP */}
+                    {/* Main Actions */}
                     <div className="flex flex-wrap items-center gap-3">
                         {!isMember ? (
                             <button onClick={joinGroup} className="h-10 px-6 rounded-full bg-emerald-600 text-white text-sm font-bold shadow-md hover:bg-emerald-700 hover:shadow-lg active:scale-95 transition-all">
@@ -578,14 +600,21 @@ export default function GroupDetail() {
                 <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm">
                     <div className="flex items-center justify-between mb-3">
                         <h2 className="text-sm font-bold text-neutral-900">Members ({memberCount})</h2>
-                        <div className="flex -space-x-2 overflow-hidden">
-                             {members.slice(0, 5).map(m => (
-                                <div key={m.user_id} className="h-8 w-8 rounded-full ring-2 ring-white bg-neutral-100 flex items-center justify-center text-[10px] font-bold text-neutral-500 cursor-default" title={m.name || "User"}>
-                                    {(m.name || "?").slice(0,1)}
-                                </div>
-                             ))}
-                             {memberCount > 5 && <div className="h-8 w-8 rounded-full ring-2 ring-white bg-neutral-50 flex items-center justify-center text-[10px] font-bold text-neutral-400">+{memberCount - 5}</div>}
-                        </div>
+                        <button onClick={() => setMembersOpen(true)} className="text-xs font-medium text-emerald-600 hover:underline">
+                            View All
+                        </button>
+                    </div>
+                    <div className="flex -space-x-2 overflow-hidden cursor-pointer" onClick={() => setMembersOpen(true)}>
+                         {members.slice(0, 5).map(m => (
+                            <div key={m.user_id} className="h-8 w-8 rounded-full ring-2 ring-white bg-neutral-100 flex items-center justify-center text-[10px] font-bold text-neutral-500" title={m.name || "User"}>
+                                {m.avatar_url ? (
+                                    <img src={m.avatar_url} alt="" className="h-full w-full object-cover rounded-full" />
+                                ) : (
+                                    (m.name || "?").slice(0,1)
+                                )}
+                            </div>
+                         ))}
+                         {memberCount > 5 && <div className="h-8 w-8 rounded-full ring-2 ring-white bg-neutral-50 flex items-center justify-center text-[10px] font-bold text-neutral-400">+{memberCount - 5}</div>}
                     </div>
                 </div>
             </div>
@@ -632,6 +661,39 @@ export default function GroupDetail() {
                     <button onClick={() => setCreateOpen(false)} className="px-5 py-2.5 text-sm font-bold text-neutral-500 hover:bg-neutral-50 rounded-xl transition-colors">Cancel</button>
                     <button onClick={confirmCreateVoting} className="px-6 py-2.5 text-sm font-bold bg-black text-white rounded-xl shadow-lg hover:bg-neutral-800 active:scale-95 transition-all">Create Vote</button>
                 </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Members Modal */}
+      {membersOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+            <div className="flex justify-between items-center mb-4 shrink-0">
+                <h3 className="text-xl font-bold text-neutral-900">Members ({members.length})</h3>
+                <button onClick={() => setMembersOpen(false)} className="p-1 rounded-full hover:bg-neutral-100 text-neutral-500"><X className="h-5 w-5" /></button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto pr-2 space-y-2">
+               {members.map((m) => (
+                 <div key={m.user_id} className="flex items-center justify-between p-2 rounded-xl hover:bg-neutral-50 transition-colors">
+                    <div className="flex items-center gap-3">
+                       <div className="h-10 w-10 rounded-full bg-neutral-200 flex items-center justify-center overflow-hidden">
+                          {m.avatar_url ? (
+                             <img src={m.avatar_url} className="w-full h-full object-cover" />
+                          ) : (
+                             <span className="text-sm font-bold text-neutral-500">{(m.name || "?").slice(0,1)}</span>
+                          )}
+                       </div>
+                       <div>
+                          <div className="text-sm font-bold text-neutral-900">{m.name || "User"}</div>
+                          {m.role === 'host' && <div className="text-[10px] text-amber-600 font-bold uppercase tracking-wide">Host</div>}
+                          {m.role === 'owner' && <div className="text-[10px] text-amber-600 font-bold uppercase tracking-wide">Owner</div>}
+                       </div>
+                    </div>
+                 </div>
+               ))}
             </div>
           </div>
         </div>
