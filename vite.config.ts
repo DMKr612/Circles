@@ -5,7 +5,7 @@ import compression from 'vite-plugin-compression';
 import { fileURLToPath, URL } from 'node:url';
 
 export default defineConfig({
-  base: '/Circles/',
+  base: '/circles/',
   plugins: [
     react(),
     compression({ algorithm: 'brotliCompress' }),
