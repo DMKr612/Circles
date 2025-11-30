@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { Users, Calendar, MessageSquare, UserPlus, UserCheck, X } from "lucide-react";
+import { Users, Calendar, MessageSquare, UserPlus, UserCheck, X, AlertTriangle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "@/App";
+
+const toast = (msg: string) => alert(msg);
 
 type FriendState = 'none' | 'pending_in' | 'pending_out' | 'accepted' | 'blocked';
 
@@ -14,9 +15,7 @@ interface ViewOtherProfileModalProps {
 
 export default function ViewOtherProfileModal({ isOpen, onClose, viewUserId }: ViewOtherProfileModalProps) {
   const navigate = useNavigate();
-
-  const { user } = useAuth();
-  const uid = user?.id || null;
+  const [uid, setUid] = useState<string | null>(null);
 
   const [viewName, setViewName] = useState<string>("");
   const [viewAvatar, setViewAvatar] = useState<string | null>(null);
@@ -34,6 +33,14 @@ export default function ViewOtherProfileModal({ isOpen, onClose, viewUserId }: V
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const [viewFriendStatus, setViewFriendStatus] = useState<FriendState>('none');
   const [err, setErr] = useState<string | null>(null);
+  const [reporting, setReporting] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const { data: auth } = await supabase.auth.getUser();
+      setUid(auth.user?.id || null);
+    })();
+  }, []);
 
   useEffect(() => {
     if (!isOpen || !viewUserId || !uid) return;
@@ -41,6 +48,7 @@ export default function ViewOtherProfileModal({ isOpen, onClose, viewUserId }: V
     setErr(null);
     setRateBusy(false);
     setHoverRating(null);
+    setReporting(false);
 
     async function loadData() {
       const { data: prof } = await supabase
@@ -137,6 +145,32 @@ export default function ViewOtherProfileModal({ isOpen, onClose, viewUserId }: V
     } catch (e) {}
   }
 
+  async function handleReport() {
+    if (!uid || !viewUserId) return;
+    if (!window.confirm("Are you sure you want to report and block this user? They will not be able to contact you.")) return;
+    
+    setReporting(true);
+    try {
+      const { error: repErr } = await supabase.from('reports').insert({
+        reporter_id: uid,
+        reported_id: viewUserId,
+        reason: 'User Reported via Profile'
+      });
+      if (repErr) throw repErr;
+
+      const { error: blockErr } = await supabase.rpc('block_user', { target_id: viewUserId });
+      if (blockErr) throw blockErr;
+
+      toast("User reported and blocked.");
+      setViewFriendStatus('blocked');
+      onClose();
+    } catch (e: any) {
+      toast("Failed to report user.");
+    } finally {
+      setReporting(false);
+    }
+  }
+
   async function rateUser(n: number) {
     if (!uid || !viewUserId || rateBusy || !viewAllowRatings) return;
     setRateBusy(true);
@@ -169,15 +203,15 @@ export default function ViewOtherProfileModal({ isOpen, onClose, viewUserId }: V
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl">
+      <div className="relative w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl overflow-y-auto max-h-[90vh]">
         <button onClick={onClose} className="absolute top-4 right-4 p-2 rounded-full bg-white text-neutral-500">
           <X className="h-5 w-5" />
         </button>
 
         <div className="flex flex-col items-center mb-6">
-          <div className="h-24 w-24 rounded-full bg-neutral-200 overflow-hidden">
+          <div className="h-24 w-24 rounded-full bg-neutral-200 overflow-hidden shadow-sm">
             {viewAvatar ? (
-              <img src={viewAvatar} className="h-full w-full object-cover" />
+              <img src={viewAvatar} alt="Avatar" className="h-full w-full object-cover" />
             ) : (
               <div className="h-full w-full flex items-center justify-center text-3xl font-bold text-neutral-500">
                 {viewName.slice(0,1).toUpperCase()}
@@ -207,6 +241,12 @@ export default function ViewOtherProfileModal({ isOpen, onClose, viewUserId }: V
           {viewFriendStatus === 'accepted' && (
             <button onClick={() => handleFriendAction('remove')} className="flex-1 py-2 rounded-xl bg-neutral-200 text-neutral-600 text-sm font-bold flex items-center justify-center gap-2">
               <UserCheck className="h-4 w-4" /> Friends
+            </button>
+          )}
+
+          {viewFriendStatus === 'blocked' && (
+            <button disabled className="flex-1 py-2 rounded-xl bg-red-600 text-white text-sm font-bold flex items-center justify-center gap-2 cursor-not-allowed">
+              <AlertTriangle className="h-4 w-4" /> Blocked
             </button>
           )}
         </div>
@@ -279,6 +319,7 @@ export default function ViewOtherProfileModal({ isOpen, onClose, viewUserId }: V
                     onMouseLeave={() => setHoverRating(null)}
                     onClick={() => rateUser(n)}
                     className={`text-2xl transition-transform hover:scale-110 ${active ? "text-amber-400" : "text-neutral-200"}`}
+                    aria-label={`Rate ${n} star${n > 1 ? 's' : ''}`}
                   >
                     ★
                   </button>
@@ -286,6 +327,20 @@ export default function ViewOtherProfileModal({ isOpen, onClose, viewUserId }: V
               })}
             </div>
             {err && <div className="text-center text-[10px] text-red-500 mt-1">{err}</div>}
+          </div>
+        )}
+
+        {/* Report Button */}
+        {viewFriendStatus !== 'blocked' && (
+          <div className="mt-6 flex justify-center">
+            <button
+              onClick={handleReport}
+              disabled={reporting}
+              className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-xl text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <AlertTriangle className="h-4 w-4" />
+              {reporting ? "Reporting..." : "Report & Block User"}
+            </button>
           </div>
         )}
       </div>

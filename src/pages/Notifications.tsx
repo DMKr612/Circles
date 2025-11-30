@@ -22,41 +22,39 @@ export default function NotificationsPage() {
   useEffect(() => {
     if (!user) return;
 
+    const userId = user.id;
+
     async function loadData() {
       setLoading(true);
       const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
 
       try {
-        // 1. Friend Requests
         const { data: fr } = await supabase
           .from("friendships" as any)
           .select("id, user_id_a, created_at, profiles!friendships_user_id_a_fkey(name, avatar_url)")
-          .eq("user_id_b", user.id)
+          .eq("user_id_b", userId)
           .eq("status", "pending")
-          .gt("created_at", twoWeeksAgo); // Limit 2 weeks
+          .gt("created_at", twoWeeksAgo);
 
-        // 2. Group Invites
         const { data: inv } = await supabase
           .from("group_members" as any)
           .select("group_id, created_at, groups(title)")
-          .eq("user_id", user.id)
+          .eq("user_id", userId)
           .eq("status", "invited")
           .gt("created_at", twoWeeksAgo);
 
-        // 3. Active Groups (to get polls/messages)
         const { data: myGroups } = await supabase
           .from("group_members" as any)
           .select("group_id")
-          .eq("user_id", user.id)
+          .eq("user_id", userId)
           .eq("status", "active");
-        
+
         const gIds = myGroups?.map((g: any) => g.group_id) || [];
 
         let fetchedPolls: any[] = [];
         let fetchedMsgs: any[] = [];
 
         if (gIds.length > 0) {
-          // Polls
           const { data: p } = await supabase
             .from("group_polls" as any)
             .select("id, title, group_id, created_at, groups(title)")
@@ -66,12 +64,11 @@ export default function NotificationsPage() {
             .order("created_at", { ascending: false });
           fetchedPolls = p || [];
 
-          // Messages (Fetch last 50 to summarize)
           const { data: m } = await supabase
             .from("group_messages" as any)
             .select("group_id, created_at, groups(title)")
             .in("group_id", gIds)
-            .neq("user_id", user.id) // Don't notify my own messages
+            .neq("user_id", userId)
             .gt("created_at", twoWeeksAgo)
             .order("created_at", { ascending: false })
             .limit(50);
@@ -82,13 +79,13 @@ export default function NotificationsPage() {
         setInvites(inv || []);
         setPolls(fetchedPolls);
         setMessages(fetchedMsgs);
-
       } catch (e) {
         console.error("Error loading notifications", e);
       } finally {
         setLoading(false);
       }
     }
+
     loadData();
   }, [user]);
 
@@ -187,7 +184,7 @@ export default function NotificationsPage() {
 
   async function handleJoinGroup(gid: string) {
     if (!user) return;
-    await supabase.from("group_members" as any).update({ status: "active" }).eq("group_id", gid).eq("user_id", user.id);
+    await supabase.from("group_members" as any).update({ status: "active" }).eq("group_id", gid).eq("user_id", user!.id);
     setInvites(prev => prev.filter(i => i.group_id !== gid));
     navigate(`/group/${gid}`);
   }

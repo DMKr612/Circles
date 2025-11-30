@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { supabase } from "@/lib/supabase";
 
@@ -236,26 +236,36 @@ export default function Onboarding() {
               {isLast && (
                 <div className="mt-6 w-full max-w-sm mx-auto">
                   {!showEmailForm ? (
-                    <div className="grid grid-cols-1 gap-3">
-                      <button
-                        onClick={loginGoogle}
-                        className="w-full rounded-lg bg-white/90 px-4 py-3 font-semibold text-indigo-700 hover:bg-white"
-                      >
-                        Continue with Google
-                      </button>
-                      <button
-                        onClick={() => { setShowEmailForm(true); setAuthErr(null); }}
-                        className="w-full rounded-lg bg-white text-indigo-700 px-4 py-3 font-semibold"
-                      >
-                        Continue with Email
-                      </button>
-                      <button
-                        onClick={loginFacebook}
-                        className="w-full rounded-lg bg-[#1877F2] px-4 py-3 font-semibold text-white"
-                      >
-                        Continue with Facebook
-                      </button>
-                    </div>
+                    <>
+                      <div className="grid grid-cols-1 gap-3">
+                        <button
+                          onClick={loginGoogle}
+                          className="w-full rounded-lg bg-white/90 px-4 py-3 font-semibold text-indigo-700 hover:bg-white"
+                        >
+                          Continue with Google
+                        </button>
+                        <button
+                          onClick={() => { setShowEmailForm(true); setAuthErr(null); }}
+                          className="w-full rounded-lg bg-white text-indigo-700 px-4 py-3 font-semibold"
+                        >
+                          Continue with Email
+                        </button>
+                        <button
+                          onClick={loginFacebook}
+                          className="w-full rounded-lg bg-[#1877F2] px-4 py-3 font-semibold text-white"
+                        >
+                          Continue with Facebook
+                        </button>
+                      </div>
+
+                      <p className="mt-4 text-center text-[10px] text-white/60">
+                        By continuing, you agree to our{" "}
+                        <Link to="/legal" className="underline hover:text-white">
+                          Terms & Privacy Policy
+                        </Link>
+                        .
+                      </p>
+                    </>
                   ) : (
                     <form onSubmit={submitCreds} className="grid grid-cols-1 gap-3">
                       <input

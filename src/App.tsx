@@ -37,6 +37,7 @@ const Onboarding = lazy(() => import("./pages/Onboarding"));
 const JoinByCode = lazy(() => import("./pages/JoinByCode"));
 const NotificationsPage = lazy(() => import("./pages/Notifications"));
 const Chats = lazy(() => import("./pages/Chats"));
+const Legal = lazy(() => import("./pages/Legal"));
 
 // ---- Route prefetch helpers (Step 1) ----
 const routePrefetchers: Record<string, () => void> = {
@@ -237,7 +238,7 @@ export default function App() {
       <AuthProvider>
           {/* Support Button - Styled cleaner */}
           <button
-            onClick={() => { console.log("Support button clicked"); }}
+            onClick={() => window.open("mailto:support@yourdomain.com?subject=Help%20with%20Circles%20App", "_blank")}
             className="fixed top-4 right-4 z-50 grid h-10 w-10 place-items-center rounded-full bg-white text-neutral-600 shadow-md ring-1 ring-black/5 transition-transform hover:scale-105 hover:text-black"
             title="Support"
             aria-label="Support"
@@ -257,6 +258,7 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<Navigate to="/browse" replace />} />
                 <Route path="/onboarding" element={<Onboarding />} />
+                <Route path="/legal" element={<Legal />} />
                 <Route path="/invite/:code" element={<JoinByCode />} />
 
                 <Route element={<RequireAuth><Layout /></RequireAuth>}>
