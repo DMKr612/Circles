@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Users, Calendar, MessageSquare, UserPlus, UserCheck, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/App";
 
 type FriendState = 'none' | 'pending_in' | 'pending_out' | 'accepted' | 'blocked';
 
@@ -13,7 +14,9 @@ interface ViewOtherProfileModalProps {
 
 export default function ViewOtherProfileModal({ isOpen, onClose, viewUserId }: ViewOtherProfileModalProps) {
   const navigate = useNavigate();
-  const [uid, setUid] = useState<string | null>(null);
+
+  const { user } = useAuth();
+  const uid = user?.id || null;
 
   const [viewName, setViewName] = useState<string>("");
   const [viewAvatar, setViewAvatar] = useState<string | null>(null);
@@ -31,13 +34,6 @@ export default function ViewOtherProfileModal({ isOpen, onClose, viewUserId }: V
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const [viewFriendStatus, setViewFriendStatus] = useState<FriendState>('none');
   const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      const { data: auth } = await supabase.auth.getUser();
-      setUid(auth.user?.id || null);
-    })();
-  }, []);
 
   useEffect(() => {
     if (!isOpen || !viewUserId || !uid) return;

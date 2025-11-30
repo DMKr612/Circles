@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from "../../lib/supabase";
 import { Search, MapPin, Users, ArrowLeft, Clock } from "lucide-react";
+import { useAuth } from "../../App";
 
 type Group = {
   id: string;
@@ -32,6 +33,9 @@ function normCity(s?: string | null) {
 }
 
 export default function GroupsByGame() {
+  const { user } = useAuth();
+  const userId = user?.id || null;
+
   const { game = '' } = useParams();
   const key = (game || '').toLowerCase().replace(/[^a-z0-9]+/g, '').trim();
   const display = (game || '').replace(/-/g, ' ').trim();
@@ -40,7 +44,6 @@ export default function GroupsByGame() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const [userId, setUserId] = useState<string | null>(null);
   const [memberOf, setMemberOf] = useState<Set<string>>(new Set());
   const [joiningId, setJoiningId] = useState<string | null>(null);
 
@@ -129,31 +132,6 @@ export default function GroupsByGame() {
     })();
     return () => { mounted = false; };
   }, [key, display]);
-
-  // Load User & Membership
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const { data: u } = await supabase.auth.getUser();
-      const uid = u?.user?.id ?? null;
-      if (!mounted) return;
-      setUserId(uid);
-      
-      if (!uid) { setMemberOf(new Set()); return; }
-
-      const { data } = await supabase.from('group_members').select('group_id').eq('user_id', uid);
-      if (mounted && data) {
-          setMemberOf(new Set(data.map((r: any) => r.group_id)));
-      }
-      
-      // Get Profile City
-      const { data: prof } = await supabase.from('profiles').select('city').eq('user_id', uid).maybeSingle();
-      const val = (prof?.city as string) || null;
-      const normalized = val && typeof val === 'string' ? val.trim() : null;
-      setMyCity(normalized);
-    })();
-    return () => { mounted = false; };
-  }, []);
 
   async function joinGroup(groupId: string) {
     if (!userId) { setErr('Sign in required'); return; }

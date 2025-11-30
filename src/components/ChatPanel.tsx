@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Message } from "@/types";
+import { useAuth } from "@/App";
 
 type Profile = { user_id: string; id?: string; name: string | null; avatar_url?: string | null };
 type Member = { user_id: string; name: string | null; avatar_url?: string | null };
@@ -41,9 +42,7 @@ type ChatPanelProps = {
 
 export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full, setFull }: ChatPanelProps) {
   // base state
-  const [me, setMe] = useState<string | null>(null);
   const [myProfile, setMyProfile] = useState<Profile | null>(null);
-  const [myEmail, setMyEmail] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<Map<string, Profile>>(new Map());
 
   const [msgs, setMsgs] = useState<Message[]>([]);
@@ -71,49 +70,11 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const earliestTs = useMemo(() => (msgs.length ? msgs[0].created_at : null), [msgs]);
 
-  // boot user + profile
-  useEffect(() => {
-    if (user?.id) setMe(user.id as string);
-  }, [user]);
+  // Auth hook for user info
+  const { user: authUser } = useAuth();
+  const me = authUser?.id || null;
+  const myEmail = authUser?.email || null;
 
-  // Keep me/myProfile in sync with auth changes
-  useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_evt, session) => {
-      const uid = session?.user?.id ?? null;
-      const email = session?.user?.email ?? null;
-
-      setMe(uid);
-      setMyEmail(email ?? null);
-      if (!uid) return;
-
-      const { data: p } = await supabase
-        .from("profiles")
-        .select("user_id,id,name,avatar_url")
-        .eq("user_id", uid)
-        .maybeSingle();
-
-      if (p) {
-        setMyProfile(p as any);
-        setProfiles(prev => new Map(prev).set(p.user_id, p as any));
-      } else {
-        const fallbackName = (email ?? "").split("@")[0] || "Player";
-        const { data: up } = await supabase
-          .from("profiles")
-          .upsert(
-            { user_id: uid, name: fallbackName, city: "Unknown", timezone: "UTC" },
-            { onConflict: "user_id" }
-          )
-          .select("user_id,id,name,avatar_url")
-          .maybeSingle();
-
-        if (up) {
-          setMyProfile(up as any);
-          setProfiles(prev => new Map(prev).set(up.user_id, up as any));
-        }
-      }
-    });
-    return () => { sub.subscription.unsubscribe(); };
-  }, []);
 
   // load messages + profiles + reactions + reads
   useEffect(() => {
@@ -409,9 +370,6 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
     })();
   }, [msgs, profiles]);
 
-  useEffect(() => {
-    if (user?.email) setMyEmail(user.email as string);
-  }, [user]);
 
   // read receipt
   useEffect(() => {
@@ -438,19 +396,11 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
     return () => obs.disconnect();
   }, [me, msgs]);
 
-  const ensureUid = async (): Promise<string | null> => {
-    if (me) return me;
-    if (user?.id) { setMe(user.id as string); return user.id as string; }
-    const { data } = await supabase.auth.getUser();
-    const uid = data.user?.id ?? null;
-    if (uid) setMe(uid);
-    return uid;
-  };
 
   const send = async () => {
     const text = input.trim();
     const parentId = replyTo?.id ?? null;
-    const uid = await ensureUid();
+    const uid = me;
     if (!uid) return;
     if ((!text && files.length === 0) || sending || uploading) return;
 

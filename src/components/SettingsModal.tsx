@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { City } from 'country-state-city';
 // FIX: Use a relative path from `components/` to `src/lib/`
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/App";
 
 // Demo stubs for toast calls
 const success = (m?: string) => console.log("[ok]", m || "");
@@ -15,7 +16,8 @@ interface SettingsModalProps {
 }
 
 export default function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
-  const [uid, setUid] = useState<string | null>(null);
+  const { user } = useAuth();
+  const uid = user?.id || null;
   
   // Settings modal state
   const [sName, setSName] = useState<string>("");
@@ -77,18 +79,15 @@ export default function SettingsModal({ isOpen, onClose, onSave }: SettingsModal
     if (LS_PUSH) setPushNotifs(LS_PUSH === '1');
 
     (async () => {
-      const { data: auth } = await supabase.auth.getUser();
-      const myUid = auth?.user?.id || null;
-      if (!myUid) {
+      if (!uid) {
         onClose(); // Should not happen if modal is opened from profile
         return;
       }
-      setUid(myUid);
       
       const { data: p, error } = await supabase
         .from("profiles")
         .select("name, city, timezone, interests, avatar_url, allow_ratings")
-        .eq("user_id", myUid)
+        .eq("user_id", uid)
         .maybeSingle();
         
       if (error) { setSettingsMsg(error.message); return; }
@@ -101,10 +100,10 @@ export default function SettingsModal({ isOpen, onClose, onSave }: SettingsModal
       setSInterests(ints.join(", "));
       setAvatarUrl((p as any)?.avatar_url ?? null);
       setAllowRatings((p as any)?.allow_ratings ?? true);
-      setInitials((name || auth.user?.email || "?").slice(0, 2).toUpperCase());
+      setInitials((name || user?.email || "?").slice(0, 2).toUpperCase());
     })();
     
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, uid, user?.email]);
 
   function applyTheme(theme: 'system'|'light'|'dark') {
     const root = document.documentElement;

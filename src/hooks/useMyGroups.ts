@@ -1,5 +1,6 @@
 // src/hooks/useMyGroups.ts
 import { useCallback, useEffect, useState } from "react";
+import { useAuth } from "@/App";
 import { supabase } from "@/lib/supabase";
 import type { MyGroupRow } from "@/types";
 
@@ -12,7 +13,8 @@ const PAGE_SIZE = 12;
 const HIGH_LEVEL = new Set(["games", "study", "outdoors"]);
 
 export function useMyGroups({ category, search }: Args) {
-  const [me, setMe] = useState<string | null>(null);
+  const { user } = useAuth();
+  const me = user?.id || null;
 
   const [groups, setGroups] = useState<MyGroupRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -60,13 +62,6 @@ export function useMyGroups({ category, search }: Args) {
     };
   }, []);
 
-  // --- Load current user id ---
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.auth.getUser();
-      setMe(data.user?.id ?? null);
-    })();
-  }, []);
 
   // --- Unread helpers ---
 

@@ -1,258 +1,317 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { useNavigate } from "react-router-dom";
+import { ChevronDown, ChevronUp, MessageCircle, CheckSquare, UserPlus, Mail } from "lucide-react";
+import { useAuth } from "@/App";
 
 export default function NotificationsPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
 
-  const [uid, setUid] = useState<string | null>(null);
-  const [incomingRequests, setIncomingRequests] = useState<any[]>([]);
-  const [groupInvites, setGroupInvites] = useState<any[]>([]);
-  const [groupNotifs, setGroupNotifs] = useState<any[]>([]);
-  const [activePolls, setActivePolls] = useState<any[]>([]);
-  const [newMembers, setNewMembers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Raw Data
+  const [friendReqs, setFriendReqs] = useState<any[]>([]);
+  const [invites, setInvites] = useState<any[]>([]);
+  const [polls, setPolls] = useState<any[]>([]);
+  const [messages, setMessages] = useState<any[]>([]);
+
+  // UI State
+  const [showOlder, setShowOlder] = useState(false);
 
   useEffect(() => {
-    async function load() {
-      const { data: auth } = await supabase.auth.getUser();
-      const myUid = auth?.user?.id || null;
-      if (!myUid) {
-        navigate("/onboarding");
-        return;
+    if (!user) return;
+
+    async function loadData() {
+      setLoading(true);
+      const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+
+      try {
+        // 1. Friend Requests
+        const { data: fr } = await supabase
+          .from("friendships" as any)
+          .select("id, user_id_a, created_at, profiles!friendships_user_id_a_fkey(name, avatar_url)")
+          .eq("user_id_b", user.id)
+          .eq("status", "pending")
+          .gt("created_at", twoWeeksAgo); // Limit 2 weeks
+
+        // 2. Group Invites
+        const { data: inv } = await supabase
+          .from("group_members" as any)
+          .select("group_id, created_at, groups(title)")
+          .eq("user_id", user.id)
+          .eq("status", "invited")
+          .gt("created_at", twoWeeksAgo);
+
+        // 3. Active Groups (to get polls/messages)
+        const { data: myGroups } = await supabase
+          .from("group_members" as any)
+          .select("group_id")
+          .eq("user_id", user.id)
+          .eq("status", "active");
+        
+        const gIds = myGroups?.map((g: any) => g.group_id) || [];
+
+        let fetchedPolls: any[] = [];
+        let fetchedMsgs: any[] = [];
+
+        if (gIds.length > 0) {
+          // Polls
+          const { data: p } = await supabase
+            .from("group_polls" as any)
+            .select("id, title, group_id, created_at, groups(title)")
+            .in("group_id", gIds)
+            .eq("status", "open")
+            .gt("created_at", twoWeeksAgo)
+            .order("created_at", { ascending: false });
+          fetchedPolls = p || [];
+
+          // Messages (Fetch last 50 to summarize)
+          const { data: m } = await supabase
+            .from("group_messages" as any)
+            .select("group_id, created_at, groups(title)")
+            .in("group_id", gIds)
+            .neq("user_id", user.id) // Don't notify my own messages
+            .gt("created_at", twoWeeksAgo)
+            .order("created_at", { ascending: false })
+            .limit(50);
+          fetchedMsgs = m || [];
+        }
+
+        setFriendReqs(fr || []);
+        setInvites(inv || []);
+        setPolls(fetchedPolls);
+        setMessages(fetchedMsgs);
+
+      } catch (e) {
+        console.error("Error loading notifications", e);
+      } finally {
+        setLoading(false);
       }
-      setUid(myUid);
+    }
+    loadData();
+  }, [user]);
 
-      const { data: incoming } = await supabase
-        .from("friendships")
-        .select("id,user_id_a,user_id_b,status,requested_by, profiles!friendships_user_id_a_fkey(name,avatar_url)")
-        .eq("user_id_b", myUid)
-        .eq("status", "pending");
-      setIncomingRequests(incoming ?? []);
+  // --- Process Data (Grouping & Sorting) ---
 
-      const { data: inv } = await supabase
-        .from("group_members")
-        .select("group_id, role, status, created_at, groups(title)")
-        .eq("user_id", myUid)
-        .in("status", ["pending", "invited"])
-        .order("created_at", { ascending: false });
-      setGroupInvites(inv ?? []);
+  const processedEvents = useMemo(() => {
+    const events: any[] = [];
+    const now = Date.now();
+    const oneDay = 24 * 60 * 60 * 1000;
 
-      const { data: gm } = await supabase
-        .from("group_members")
-        .select("group_id")
-        .eq("user_id", myUid)
-        .eq("status", "active");
-      const gIds = gm?.map((r: any) => r.group_id) || [];
+    // A. Friend Requests
+    friendReqs.forEach(r => {
+      events.push({
+        id: `fr-${r.id}`,
+        type: 'friend_req',
+        date: new Date(r.created_at),
+        data: r
+      });
+    });
 
-      if (gIds.length > 0) {
-        const { data: msgs } = await supabase
-          .from("group_messages")
-          .select("group_id, body, created_at, groups(title), user_id")
-          .in("group_id", gIds)
-          .neq("user_id", myUid)
-          .order("created_at", { ascending: false })
-          .limit(10);
-        setGroupNotifs(msgs ?? []);
+    // B. Group Invites
+    invites.forEach(i => {
+      events.push({
+        id: `inv-${i.group_id}`,
+        type: 'invite',
+        date: new Date(i.created_at),
+        data: i
+      });
+    });
 
-        const { data: polls } = await supabase
-          .from("group_polls")
-          .select("id, title, group_id, groups(title)")
-          .in("group_id", gIds)
-          .eq("status", "open");
-        setActivePolls(polls ?? []);
-
-        const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-        const { data: members } = await supabase
-          .from("group_members")
-          .select("group_id, user_id, created_at, groups(title), profiles(name)")
-          .in("group_id", gIds)
-          .neq("user_id", myUid)
-          .gt("created_at", twoDaysAgo)
-          .order("created_at", { ascending: false });
-        setNewMembers(members ?? []);
+    // C. Polls (Deduplicated by ID)
+    const uniquePolls = new Map();
+    polls.forEach(p => {
+      if (!uniquePolls.has(p.id)) {
+        uniquePolls.set(p.id, p);
       }
+    });
+    
+    Array.from(uniquePolls.values()).forEach((p: any) => {
+      events.push({
+        id: `poll-${p.id}`,
+        type: 'poll',
+        date: new Date(p.created_at),
+        data: p
+      });
+    });
 
-      // Deduplicate polls by id (in case of duplicates)
-      const uniquePollsMap = new Map<string, any>();
-      (activePolls ?? []).forEach(poll => {
-        if (!uniquePollsMap.has(poll.id)) {
-          uniquePollsMap.set(poll.id, poll);
+    // D. Messages (WHATSAPP STYLE AGGREGATION)
+    // Group messages by Group ID. Instead of showing 5 rows, show "5 new messages"
+    const msgGroups: Record<string, { count: number, latest: Date, groupName: string }> = {};
+    
+    messages.forEach(m => {
+      const gid = m.group_id;
+      if (!msgGroups[gid]) {
+        msgGroups[gid] = { 
+          count: 0, 
+          latest: new Date(m.created_at), 
+          groupName: m.groups?.title || "Unknown Group" 
+        };
+      }
+      msgGroups[gid].count++;
+      // keep track of newest message time for sorting
+      const mDate = new Date(m.created_at);
+      if (mDate > msgGroups[gid].latest) msgGroups[gid].latest = mDate;
+    });
+
+    Object.keys(msgGroups).forEach(gid => {
+      events.push({
+        id: `msg-group-${gid}`,
+        type: 'message_summary',
+        date: msgGroups[gid].latest,
+        data: { 
+          group_id: gid, 
+          title: msgGroups[gid].groupName, 
+          count: msgGroups[gid].count 
         }
       });
-      const uniquePolls = Array.from(uniquePollsMap.values());
-      setActivePolls(uniquePolls);
+    });
 
-      setLoading(false);
-    }
-    load();
-  }, []);
+    // Sort all by date descending
+    events.sort((a, b) => b.date.getTime() - a.date.getTime());
 
-  const handleAcceptFriend = async (id: string, fromId: string) => {
+    // Split into Recent (< 24h) and Older (> 24h)
+    const recent = events.filter(e => (now - e.date.getTime()) < oneDay);
+    const older = events.filter(e => (now - e.date.getTime()) >= oneDay);
+
+    return { recent, older };
+  }, [friendReqs, invites, polls, messages]);
+
+  // --- Handlers ---
+
+  async function handleAcceptFriend(id: string, fromId: string) {
     await supabase.rpc("accept_friend", { from_id: fromId });
-    setIncomingRequests(prev => prev.filter(r => r.id !== id));
-  };
+    setFriendReqs(prev => prev.filter(r => r.id !== id));
+  }
 
-  const handleGroupInvite = async (gid: string, action: "accept" | "decline") => {
-    if (!uid) return;
-    if (action === "accept") {
-      await supabase.from("group_members").update({ status: "active" }).eq("group_id", gid).eq("user_id", uid);
-    } else {
-      await supabase.from("group_members").delete().eq("group_id", gid).eq("user_id", uid);
-    }
-    setGroupInvites(prev => prev.filter(i => i.group_id !== gid));
-  };
+  async function handleJoinGroup(gid: string) {
+    if (!user) return;
+    await supabase.from("group_members" as any).update({ status: "active" }).eq("group_id", gid).eq("user_id", user.id);
+    setInvites(prev => prev.filter(i => i.group_id !== gid));
+    navigate(`/group/${gid}`);
+  }
 
-  if (loading) return <div className="pt-24 p-6 text-neutral-500 text-center">Loading updates...</div>;
+  // --- Render Helpers ---
 
-  // Build unified events list
-  const now = Date.now();
-  const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
-
-  type EventItem = {
-    id: string;
-    type: string;
-    created_at: string;
-    content: JSX.Element;
-  };
-
-  const events: EventItem[] = [];
-
-  incomingRequests.forEach(r => {
-    events.push({
-      id: `friend_${r.id}`,
-      type: "friend_request",
-      created_at: r.created_at || new Date().toISOString(),
-      content: (
-        <div className="p-3 border border-neutral-200 rounded-xl bg-white shadow-sm flex items-center justify-between">
-          <div className="font-medium text-neutral-900">{r.profiles?.name ?? "Unknown User"}</div>
-          <div className="flex gap-2">
-            <button onClick={() => handleAcceptFriend(r.id, r.user_id_a)} className="bg-emerald-600 text-white px-3 py-1.5 text-xs font-bold rounded-full shadow-sm">Accept</button>
-          </div>
+  const renderEvent = (e: any) => {
+    const isRecent = (Date.now() - e.date.getTime()) < (24 * 60 * 60 * 1000);
+    
+    return (
+      <div key={e.id} className="bg-white border border-neutral-100 p-3 rounded-2xl flex items-center gap-3 shadow-sm mb-3 animate-in fade-in slide-in-from-bottom-2">
+        {/* Icon Column */}
+        <div className={`h-10 w-10 shrink-0 rounded-full flex items-center justify-center ${
+          e.type === 'friend_req' ? 'bg-purple-100 text-purple-600' :
+          e.type === 'invite' ? 'bg-amber-100 text-amber-600' :
+          e.type === 'poll' ? 'bg-blue-100 text-blue-600' :
+          'bg-emerald-100 text-emerald-600'
+        }`}>
+          {e.type === 'friend_req' && <UserPlus className="h-5 w-5" />}
+          {e.type === 'invite' && <Mail className="h-5 w-5" />}
+          {e.type === 'poll' && <CheckSquare className="h-5 w-5" />}
+          {e.type === 'message_summary' && <MessageCircle className="h-5 w-5" />}
         </div>
-      )
-    });
-  });
 
-  groupInvites.forEach(gi => {
-    events.push({
-      id: `group_invite_${gi.group_id}`,
-      type: "group_invite",
-      created_at: gi.created_at || new Date().toISOString(),
-      content: (
-        <div className="p-3 border border-neutral-200 rounded-xl bg-white shadow-sm flex items-center justify-between">
-          <div>
-            <div className="font-medium text-neutral-900">{gi.groups?.title || "Untitled Group"}</div>
-            <div className="text-[10px] text-neutral-500">You were invited</div>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => handleGroupInvite(gi.group_id, "accept")} className="bg-emerald-600 text-white px-3 py-1.5 text-xs font-bold rounded-full shadow-sm">Join</button>
-            <button onClick={() => handleGroupInvite(gi.group_id, "decline")} className="text-neutral-500 border px-3 py-1.5 text-xs font-bold rounded-full">Decline</button>
-          </div>
-        </div>
-      )
-    });
-  });
+        {/* Content Column */}
+        <div className="flex-1 min-w-0">
+          
+          {/* Friend Request */}
+          {e.type === 'friend_req' && (
+            <>
+              <div className="text-sm font-bold text-neutral-900">{e.data.profiles?.name || "User"}</div>
+              <div className="text-xs text-neutral-500">Sent you a friend request</div>
+              <div className="mt-2 flex gap-2">
+                <button onClick={() => handleAcceptFriend(e.data.id, e.data.user_id_a)} className="bg-black text-white px-3 py-1 rounded-full text-xs font-bold">Accept</button>
+              </div>
+            </>
+          )}
 
-  activePolls.forEach(poll => {
-    events.push({
-      id: `poll_${poll.id}`,
-      type: "poll",
-      created_at: poll.created_at || new Date().toISOString(),
-      content: (
-        <div className="p-3 border border-blue-100 bg-blue-50/50 rounded-xl flex items-center justify-between">
-          <div>
-            <div className="font-bold text-blue-900 text-sm">{poll.title}</div>
-            <div className="text-[10px] text-blue-600">in {poll.groups?.title}</div>
-          </div>
-          <button onClick={() => navigate(`/group/${poll.group_id}`)} className="text-white bg-blue-600 px-3 py-1.5 text-xs font-bold rounded-full">Vote</button>
-        </div>
-      )
-    });
-  });
+          {/* Group Invite */}
+          {e.type === 'invite' && (
+            <>
+              <div className="text-sm font-bold text-neutral-900">{e.data.groups?.title}</div>
+              <div className="text-xs text-neutral-500">You were invited to join</div>
+              <div className="mt-2 flex gap-2">
+                <button onClick={() => handleJoinGroup(e.data.group_id)} className="bg-black text-white px-3 py-1 rounded-full text-xs font-bold">Join</button>
+              </div>
+            </>
+          )}
 
-  newMembers.forEach((m, i) => {
-    events.push({
-      id: `new_member_${i}_${m.group_id}_${m.user_id}`,
-      type: "new_member",
-      created_at: m.created_at,
-      content: (
-        <div className="p-3 border border-neutral-100 bg-white rounded-xl flex items-center gap-3">
-          <div className="h-8 w-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold">
-            {(m.profiles?.name || "?").slice(0, 1)}
-          </div>
-          <div>
-            <div className="text-sm text-neutral-900">
-              <span className="font-bold">{m.profiles?.name || "Someone"}</span> joined <span className="font-bold">{m.groups?.title}</span>
+          {/* Poll */}
+          {e.type === 'poll' && (
+            <div onClick={() => navigate(`/group/${e.data.group_id}`)} className="cursor-pointer">
+              <div className="text-sm font-bold text-neutral-900">{e.data.title}</div>
+              <div className="text-xs text-neutral-500 flex items-center gap-1">
+                Vote in <span className="font-medium text-neutral-700">{e.data.groups?.title}</span>
+              </div>
             </div>
-            <div className="text-[10px] text-neutral-400">{new Date(m.created_at).toLocaleDateString()}</div>
-          </div>
-        </div>
-      )
-    });
-  });
+          )}
 
-  groupNotifs.forEach((n, i) => {
-    events.push({
-      id: `group_msg_${i}_${n.group_id}`,
-      type: "group_message",
-      created_at: n.created_at,
-      content: (
-        <div onClick={() => navigate(`/group/${n.group_id}`)} className="p-3 border border-neutral-200 rounded-xl bg-white shadow-sm active:scale-[0.99] transition-transform cursor-pointer">
-          <div className="flex justify-between items-start mb-1">
-            <div className="font-bold text-sm text-neutral-900">{n.groups?.title}</div>
-            <div className="text-[10px] text-neutral-400">
-              {new Date(n.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          {/* Message Summary (WhatsApp Style) */}
+          {e.type === 'message_summary' && (
+            <div onClick={() => navigate(`/group/${e.data.group_id}`)} className="cursor-pointer">
+              <div className="text-sm font-bold text-neutral-900">{e.data.title}</div>
+              <div className="text-xs text-neutral-500 font-medium">
+                {e.data.count} new message{e.data.count > 1 ? 's' : ''}
+              </div>
             </div>
-          </div>
-          <div className="text-xs text-neutral-600 line-clamp-1">{n.body}</div>
+          )}
         </div>
-      )
-    });
-  });
 
-  // Sort events by created_at descending
-  events.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        {/* Time Column */}
+        <div className="text-[10px] text-neutral-400 whitespace-nowrap self-start">
+           {isRecent ? e.date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : e.date.toLocaleDateString()}
+        </div>
+      </div>
+    );
+  };
 
-  // Split events into recent (<24h) and older (>24h)
-  const recentEvents = events.filter(e => new Date(e.created_at).getTime() >= twentyFourHoursAgo);
-  const olderEvents = events.filter(e => new Date(e.created_at).getTime() < twentyFourHoursAgo);
+  if (loading) {
+    return <div className="pt-24 text-center text-neutral-400 text-sm">Checking for updates...</div>;
+  }
 
-  const isEmpty = events.length === 0;
+  const { recent, older } = processedEvents;
+  const isEmpty = recent.length === 0 && older.length === 0;
 
   return (
-    <div className="max-w-xl mx-auto pt-20 p-4 pb-24 space-y-6">
-      <div className="flex items-center justify-between mb-2">
-        <h1 className="text-2xl font-bold text-neutral-900">Activity</h1>
-      </div>
+    <div className="mx-auto w-full max-w-xl px-4 py-8 pb-32">
+      <h1 className="text-2xl font-extrabold text-neutral-900 mb-6">Activity</h1>
 
       {isEmpty && (
-        <div className="py-10 text-center text-neutral-500">
-          <div className="text-4xl mb-2">💤</div>
-          <p>All caught up! No new activity.</p>
+        <div className="flex flex-col items-center justify-center py-12 text-center">
+          <div className="h-16 w-16 bg-neutral-100 rounded-full flex items-center justify-center mb-4">
+            <span className="text-2xl">💤</span>
+          </div>
+          <h3 className="text-neutral-900 font-bold">All caught up</h3>
+          <p className="text-neutral-500 text-sm">No new notifications in the last 2 weeks.</p>
         </div>
       )}
 
-      {recentEvents.length > 0 && (
-        <section>
-          <h2 className="text-xs font-bold text-neutral-400 uppercase tracking-wide mb-2">Recent</h2>
-          <div className="space-y-2">
-            {recentEvents.map(e => (
-              <div key={e.id}>{e.content}</div>
-            ))}
-          </div>
-        </section>
+      {/* Recent Section */}
+      {recent.length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-3">New</h2>
+          {recent.map(renderEvent)}
+        </div>
       )}
 
-      {olderEvents.length > 0 && (
-        <section>
-          <h2 className="text-xs font-bold text-neutral-400 uppercase tracking-wide mb-2">Older</h2>
-          <div className="space-y-2">
-            {olderEvents.map(e => (
-              <div key={e.id}>{e.content}</div>
-            ))}
-          </div>
-        </section>
+      {/* Older Section (Collapsible) */}
+      {older.length > 0 && (
+        <div>
+          <button 
+            onClick={() => setShowOlder(!showOlder)}
+            className="flex items-center gap-2 text-xs font-bold text-neutral-400 uppercase tracking-wider mb-3 hover:text-neutral-600 transition-colors w-full"
+          >
+            {showOlder ? <ChevronUp className="h-4 w-4"/> : <ChevronDown className="h-4 w-4"/>}
+            Earlier ({older.length})
+          </button>
+          
+          {showOlder && (
+            <div className="animate-in slide-in-from-top-2 fade-in duration-300">
+              {older.map(renderEvent)}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
