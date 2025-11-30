@@ -16,7 +16,7 @@ export default function Layout() {
   return (
     <>
       {/* Main content wrapper */}
-      <div className="pb-24"> 
+      <div className="pb-32"> 
         <Outlet />
       </div>
 

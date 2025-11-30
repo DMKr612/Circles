@@ -234,7 +234,7 @@ export default function App() {
 
   return (
     // Added 'pb-20' to ensure content clears the bottom nav
-    <div id="page-root" className="min-h-dvh flow-root flex flex-col pb-20">
+    <div id="page-root" className="min-h-dvh flow-root flex flex-col">
       <AuthProvider>
           {/* Support Button - Styled cleaner */}
           <button
