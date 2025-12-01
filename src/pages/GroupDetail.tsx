@@ -1,11 +1,15 @@
 import { useEffect, useState, useMemo, lazy, Suspense } from "react";
 import { useParams, useNavigate, Link, useLocation } from "react-router-dom";
-import { supabase } from "@/lib/supabase";
-import type { Group, Poll, PollOption, GroupMember } from "@/types";
+// Changed absolute import to relative to fix build error
+import { supabase } from "../lib/supabase";
+import type { Group, Poll, PollOption, GroupMember } from "../types";
 import { 
   MapPin, Users, Calendar, Clock, Share2, MessageCircle, 
   LogOut, Trash2, Edit2, Check, X, Plus, ChevronLeft 
 } from "lucide-react";
+
+// Changed absolute import to relative to fix build error
+import { useGroupPresence } from "../hooks/useGroupPresence";
 
 const ChatPanel = lazy(() => import("../components/ChatPanel"));
 
@@ -24,6 +28,10 @@ export default function GroupDetail() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
   const [me, setMe] = useState<string | null>(null);
+  
+  // FIX: Convert 'null' to 'undefined' to satisfy TypeScript
+  const { isTogether } = useGroupPresence(id, me ?? undefined);
+  
   const [copied, setCopied] = useState(false);
 
   // Host check
@@ -687,9 +695,29 @@ export default function GroupDetail() {
                           )}
                        </div>
                        <div>
-                          <div className="text-sm font-bold text-neutral-900">{m.name || "User"}</div>
-                          {m.role === 'host' && <div className="text-[10px] text-amber-600 font-bold uppercase tracking-wide">Host</div>}
-                          {m.role === 'owner' && <div className="text-[10px] text-amber-600 font-bold uppercase tracking-wide">Owner</div>}
+                         <div className="text-sm font-bold text-neutral-900">{m.name || "User"}</div>
+
+                         {isTogether(m.user_id) ? (
+                           <div className="flex items-center gap-1 mt-0.5 animate-in fade-in slide-in-from-left-1">
+                             <span className="relative flex h-2 w-2">
+                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                             </span>
+                             <span className="text-[10px] font-bold text-emerald-600">Here with you</span>
+                           </div>
+                         ) : (
+                           <>
+                             {m.role === 'host' && (
+                               <div className="text-[10px] text-amber-600 font-bold uppercase tracking-wide">Host</div>
+                             )}
+                             {m.role === 'owner' && (
+                               <div className="text-[10px] text-amber-600 font-bold uppercase tracking-wide">Owner</div>
+                             )}
+                             {m.role !== 'host' && m.role !== 'owner' && (
+                               <div className="text-xs text-neutral-500 capitalize">{m.role}</div>
+                             )}
+                           </>
+                         )}
                        </div>
                     </div>
                  </div>
