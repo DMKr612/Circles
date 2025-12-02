@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "homepage": "https://daramoharramkhani.github.io/circles/",
+  "homepage": "https://DMKr612.github.io/circles/",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
