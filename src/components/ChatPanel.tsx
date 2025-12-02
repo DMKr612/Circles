@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Message } from "@/types";
 import { useAuth } from "@/App";
+import { useGroupPresence } from "@/hooks/useGroupPresence";
+import { MapPin, MoreHorizontal, Paperclip, Send, X, Smile, Reply, Loader2 } from "lucide-react";
 
 type Profile = { user_id: string; id?: string; name: string | null; avatar_url?: string | null };
 type Member = { user_id: string; name: string | null; avatar_url?: string | null };
@@ -10,7 +12,7 @@ type ReadRow = { message_id: string; user_id: string; read_at: string };
 
 const relTime = (iso: string) => {
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (s < 5) return "just now";
+  if (s < 5) return "now";
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60); if (m < 60) return `${m}m`;
   const h = Math.floor(m / 60); if (h < 24) return `${h}h`;
@@ -75,6 +77,8 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
   const me = authUser?.id || null;
   const myEmail = authUser?.email || null;
 
+  // --- LOCATION PRESENCE HOOK ---
+  const { isTogether } = useGroupPresence(groupId, me ?? undefined);
 
   // load messages + profiles + reactions + reads
   useEffect(() => {
@@ -533,9 +537,9 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
 
   const avatar = (uid: string) => {
     const p = profiles.get(uid);
-    if (p?.avatar_url) return <img src={p.avatar_url} alt="" className="h-6 w-6 rounded-full object-cover" />;
+    if (p?.avatar_url) return <img src={p.avatar_url} alt="" className="h-8 w-8 rounded-full object-cover ring-2 ring-white shadow-sm" />;
     const label = (p?.name || uid.slice(0, 2)).slice(0, 2).toUpperCase();
-    return <div className="h-6 w-6 rounded-full border flex items-center justify-center text-[10px]">{label}</div>;
+    return <div className="h-8 w-8 rounded-full border border-neutral-200 bg-neutral-100 flex items-center justify-center text-[10px] text-neutral-600 font-bold">{label}</div>;
   };
 
   const onDrop = (ev: React.DragEvent<HTMLDivElement>) => {
@@ -562,10 +566,11 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
       <div className="mt-2 flex flex-wrap gap-2">
         {atts.map((a, idx) => {
           if (a?.type?.startsWith("image/") && a.url) {
-            return <img key={idx} src={a.url} alt={a.name || ""} className="max-h-40 rounded-lg border" />;
+            return <img key={idx} src={a.url} alt={a.name || ""} className="max-h-48 rounded-lg border border-neutral-100 shadow-sm" />;
           }
           return (
-            <a key={idx} href={a.url || "#"} target="_blank" rel="noreferrer" className="text-xs underline">
+            <a key={idx} href={a.url || "#"} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-lg bg-neutral-100 px-3 py-2 text-xs font-medium text-neutral-700 hover:bg-neutral-200">
+              <Paperclip className="h-3 w-3" />
               {a.name || a.path}
             </a>
           );
@@ -576,242 +581,304 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
 
   // --- Main render ---
   return (
-    <div className="relative flex h-full w-full max-h-[85vh] min-h-[420px] flex-col overflow-hidden rounded-3xl border shadow-2xl ring-1 ring-black/10 bg-gradient-to-br from-orange-400 via-rose-500 to-fuchsia-600 p-3 sm:p-4">
-      {/* Ambient background */}
-      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.25),transparent_35%),radial-gradient(circle_at_80%_0%,rgba(255,255,255,0.2),transparent_32%)]" />
-        <div className="absolute inset-0 bg-gradient-to-b from-white/10 via-transparent to-black/15 mix-blend-soft-light" />
-      </div>
-
+    <div className="relative flex h-full w-full flex-col overflow-hidden bg-white">
+      
       {/* Header */}
-      <div className="flex shrink-0 items-center justify-between rounded-2xl border border-white/20 bg-white/15 px-4 py-3 text-white backdrop-blur-md shadow-sm">
+      <div className="flex shrink-0 items-center justify-between border-b border-neutral-100 bg-white/80 px-4 py-3 backdrop-blur-md z-10">
         <div className="flex flex-col">
-          <div className="text-sm font-bold drop-shadow-md">Group Chat</div>
-          <div className="text-[11px] opacity-90">{onlineCount > 0 ? `${onlineCount} online` : "Offline"}</div>
+          <div className="text-base font-bold text-neutral-900">Group Chat</div>
+          <div className="flex items-center gap-2 text-[11px] font-medium text-neutral-500">
+            <span className={`inline-block h-2 w-2 rounded-full ${onlineCount > 0 ? "bg-emerald-500" : "bg-neutral-300"}`} />
+            {onlineCount > 0 ? `${onlineCount} online` : "Offline"}
+          </div>
         </div>
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => setShowMembers(v => !v)}
-            className="rounded-full border border-white/30 bg-white/20 px-3 py-1 text-[11px] font-medium hover:bg-white/30 transition"
-            title="Show members"
+            className="rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-semibold text-neutral-600 hover:bg-neutral-200 transition-colors"
           >
-            Members ({members.length})
+            Members
           </button>
           <button
             onClick={onClose}
-            className="grid h-8 w-8 place-items-center rounded-full border border-white/30 bg-white/20 hover:bg-white/30 transition"
-            aria-label="Close chat"
+            className="grid h-8 w-8 place-items-center rounded-full bg-neutral-100 text-neutral-500 hover:bg-neutral-200 transition-colors"
           >
-            ✕
+            <X className="h-4 w-4" />
           </button>
         </div>
       </div>
 
       {showMembers && (
-        <div className="mt-2 rounded-2xl border border-white/40 bg-white/85 p-3 shadow-sm backdrop-blur-sm">
-          <div className="mb-1 text-xs font-semibold text-neutral-600">Members</div>
+        <div className="absolute top-[60px] right-4 z-20 w-64 rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl animate-in slide-in-from-top-2">
+          <div className="mb-3 flex items-center justify-between">
+            <span className="text-xs font-bold text-neutral-500 uppercase tracking-wide">Members ({members.length})</span>
+            <button onClick={()=>setShowMembers(false)}><X className="h-3 w-3 text-neutral-400" /></button>
+          </div>
           {members.length === 0 ? (
-            <div className="text-xs text-neutral-600">No members yet.</div>
+            <div className="text-xs text-neutral-400">No members yet.</div>
           ) : (
-            <ul className="grid grid-cols-2 gap-2 text-sm">
-              {members.map(m => (
-                <li key={m.user_id} className="flex items-center gap-2 rounded px-1 py-1 hover:bg-neutral-100">
-                  {m.avatar_url ? (
-                    <img src={m.avatar_url} alt="" className="h-6 w-6 rounded-full object-cover" />
-                  ) : (
-                    <div className="h-6 w-6 rounded-full border flex items-center justify-center text-[10px] text-neutral-600">
-                      {(m.name || "").slice(0,2).toUpperCase() || "?"}
+            <ul className="max-h-60 overflow-y-auto space-y-1 pr-1">
+              {members.map(m => {
+                const nearby = isTogether(m.user_id);
+                return (
+                  <li key={m.user_id} className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-neutral-50 transition-colors">
+                    <div className="relative">
+                      {m.avatar_url ? (
+                        <img src={m.avatar_url} alt="" className="h-8 w-8 rounded-full object-cover border border-neutral-100" />
+                      ) : (
+                        <div className="h-8 w-8 rounded-full bg-neutral-100 flex items-center justify-center text-[10px] font-bold text-neutral-500">
+                          {(m.name || "").slice(0,2).toUpperCase() || "?"}
+                        </div>
+                      )}
+                      {nearby && (
+                        <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-emerald-500 border-2 border-white" />
+                      )}
                     </div>
-                  )}
-                  <span className="truncate text-neutral-800">{(m.name && m.name.trim()) || "Player"}</span>
-                </li>
-              ))}
+                    <div className="flex-1 min-w-0">
+                      <div className="truncate text-sm font-semibold text-neutral-900">{(m.name && m.name.trim()) || "Player"}</div>
+                      {nearby && <div className="text-[10px] font-medium text-emerald-600 flex items-center gap-1">Here with you</div>}
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
       )}
 
-      {/* Messages */}
-      <div className="mt-3 flex-1 overflow-hidden rounded-2xl border border-white/30 bg-white/85 shadow-xl backdrop-blur-sm">
+      {/* Messages Area */}
+      <div className="flex-1 overflow-hidden bg-white">
         <div
           ref={listRef}
-          className="h-full overflow-y-auto p-3 sm:p-4"
+          className="h-full overflow-y-auto p-4 space-y-6"
           onDrop={onDrop}
           onDragOver={(e)=>e.preventDefault()}
           onClick={()=>setMenuFor(null)}
         >
           {hasMore && (
-            <div className="mb-3 flex justify-center">
+            <div className="mb-4 flex justify-center">
               <button
                 onClick={loadOlder}
                 disabled={loading}
-                className="rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs text-neutral-600 shadow-sm hover:bg-neutral-50 disabled:opacity-50"
+                className="rounded-full bg-neutral-100 px-4 py-1.5 text-xs font-semibold text-neutral-600 hover:bg-neutral-200 disabled:opacity-50 transition-colors"
               >
-                Load older
+                {loading ? "Loading..." : "Load older messages"}
               </button>
             </div>
           )}
 
           {loading && msgs.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-sm text-neutral-500">Loading…</div>
+            <div className="flex h-full items-center justify-center">
+              <Loader2 className="h-6 w-6 animate-spin text-neutral-300" />
+            </div>
           ) : msgs.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-neutral-600">
-              <div className="text-3xl">👋</div>
-              <div className="space-y-1">
-                <div className="text-base font-semibold text-neutral-800">No messages yet.</div>
-                <div className="text-xs text-neutral-500">Be the first to say hi!</div>
+            <div className="flex h-full flex-col items-center justify-center gap-3 text-center p-8">
+              <div className="h-16 w-16 bg-neutral-50 rounded-full flex items-center justify-center mb-2">
+                <span className="text-3xl">👋</span>
               </div>
+              <h3 className="text-lg font-bold text-neutral-900">No messages yet</h3>
+              <p className="text-sm text-neutral-500">Be the first to break the ice!</p>
             </div>
           ) : (
-            <ul className="space-y-3">
-              {msgs.map((m) => {
+            <>
+              {msgs.map((m, idx) => {
                 const isMine = !!me && m.user_id === me;
                 const reacts: Record<string, string[]> = reactions.get(m.id) ?? ({} as Record<string, string[]>);
-                const seenBy = (reads.get(m.id) ?? []).filter(u => u !== m.user_id).length;
+                const nearby = isTogether(m.user_id);
+                
+                // Grouping logic (hide avatar if same sender as prev message)
+                const showAvatar = !isMine && (idx === 0 || msgs[idx-1].user_id !== m.user_id || (new Date(m.created_at).getTime() - new Date(msgs[idx-1].created_at).getTime() > 300000)); // 5 mins
+
                 return (
-                  <li
+                  <div
                     key={m.id}
-                    className={`relative flex gap-2 ${isMine ? "justify-end" : ""}`}
+                    className={`group flex gap-3 ${isMine ? "justify-end" : "justify-start"} ${showAvatar ? 'mt-4' : 'mt-1'}`}
                     data-mid={m.id}
                   >
-                    {!isMine && avatar(m.user_id)}
-                    <div className={`flex max-w-[90%] sm:max-w-[85%] flex-col ${isMine ? "items-end" : "items-start"}`}>
-                      <div className="flex w-full items-baseline gap-2">
-                        <span className="text-xs font-semibold text-neutral-800">{displayName(m.user_id)}</span>
-                        <span className="text-[10px] text-neutral-500">{relTime(m.created_at)}</span>
-                        {m.parent_id && <span className="text-[10px] text-neutral-500">(reply)</span>}
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setMenuFor(menuFor === m.id ? null : m.id); }}
-                          className="ml-auto h-6 w-6 rounded-full text-xs leading-6 text-center text-neutral-500 hover:bg-neutral-100"
-                          aria-label="More"
-                          title="More"
-                        >
-                          ⋯
-                        </button>
+                    {!isMine && (
+                      <div className="w-8 shrink-0 flex flex-col items-center">
+                        {showAvatar && avatar(m.user_id)}
                       </div>
-
-                      {menuFor === m.id && (
-                        <div
-                          onClick={(e)=>e.stopPropagation()}
-                          className="absolute right-2 top-6 z-20 w-36 rounded-md border bg-white shadow-md p-2 text-sm"
-                        >
-                          <button
-                            className="w-full text-left px-2 py-1 rounded hover:bg-neutral-100"
-                            onClick={()=>{ setReplyTo(m); setMenuFor(null); }}
-                          >
-                            Reply
-                          </button>
-                          <div className="my-1 border-t" />
-                          <div className="px-2 py-1">
-                            <div className="mb-1 text-[11px] text-neutral-500">Add reaction</div>
-                            <div className="flex gap-2">
-                              <button className="text-base" onClick={()=>{ toggleReaction(m.id,"👍"); setMenuFor(null); }}>👍</button>
-                              <button className="text-base" onClick={()=>{ toggleReaction(m.id,"❤️"); setMenuFor(null); }}>❤️</button>
-                              <button className="text-base" onClick={()=>{ toggleReaction(m.id,"😂"); setMenuFor(null); }}>😂</button>
-                            </div>
-                          </div>
+                    )}
+                    
+                    <div className={`flex max-w-[80%] flex-col ${isMine ? "items-end" : "items-start"}`}>
+                      {showAvatar && !isMine && (
+                        <div className="ml-1 mb-1 flex items-center gap-2">
+                          <span className="text-xs font-bold text-neutral-900">
+                            {displayName(m.user_id)}
+                          </span>
+                          {nearby && (
+                            <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 bg-emerald-50 text-[9px] font-bold text-emerald-600 uppercase tracking-wide border border-emerald-100">
+                              <MapPin className="h-2.5 w-2.5" /> HERE
+                            </span>
+                          )}
+                          <span className="text-[10px] text-neutral-400 font-medium">
+                            {relTime(m.created_at)}
+                          </span>
                         </div>
                       )}
 
-                      {m.parent_id && (() => {
-                        const p = msgs.find(x => x.id === m.parent_id);
-                        if (!p) return null;
-                        return (
-                          <div className="mb-1 w-full rounded-md border border-neutral-200 bg-white px-2 py-1 text-[12px] text-neutral-700">
-                            Replying to <span className="font-medium">{displayName(p.user_id)}</span>: {p.content.slice(0, 120)}
-                            {p.content.length > 120 ? "…" : ""}
-                          </div>
-                        );
-                      })()}
-
-                      <div
-                        className={`whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm shadow-sm ${
-                        isMine ? "bg-gradient-to-r from-blue-500 to-indigo-500 text-white" : "bg-neutral-100 text-neutral-900"
-                      }`}
-                      >
-                        {m.content}
-                      </div>
-                      <div className={`mt-1 text-[10px] text-neutral-500 ${isMine ? "text-right" : "text-left"}`}>
-                            {relTime(m.created_at)}
-                      </div>
-                      {renderAttachments(m.attachments)}
-
-                      {/* reactions */}
-                      <div className="mt-1 flex flex-wrap items-center gap-2">
-                        {Object.entries(reacts).map(([emoji, users]) => {
-                          const iReacted = me ? users.includes(me) : false;
-                          return (
-                            <button
-                              key={emoji}
-                              onClick={() => toggleReaction(m.id, emoji)}
-                              className={`rounded-full border px-2 text-xs shadow-sm ${iReacted ? "bg-black text-white" : "bg-white"}`}
-                              title={users.map(u => displayName(u)).join(", ")}
-                            >
-                              {emoji} {users.length}
-                            </button>
-                          );
-                        })}
-                        <div className="flex items-center gap-1 text-[12px] text-neutral-500">
-                          {seenBy > 0 && <span className="text-[10px]">Seen by {seenBy}</span>}
+                      <div className="relative group/msg">
+                        {/* Message Bubble */}
+                        <div
+                          className={`relative px-4 py-2.5 text-sm leading-relaxed shadow-sm ${
+                            isMine 
+                              ? "bg-neutral-900 text-white rounded-2xl rounded-tr-sm" 
+                              : "bg-neutral-100 text-neutral-800 rounded-2xl rounded-tl-sm"
+                          }`}
+                        >
+                          {m.parent_id && (() => {
+                            const p = msgs.find(x => x.id === m.parent_id);
+                            if (!p) return null;
+                            return (
+                              <div className={`mb-2 rounded-lg border-l-2 px-2 py-1 text-xs opacity-90 ${isMine ? "border-neutral-500 bg-white/10" : "border-neutral-300 bg-white"}`}>
+                                <span className="font-bold block mb-0.5">{displayName(p.user_id)}</span>
+                                <span className="line-clamp-1">{p.content}</span>
+                              </div>
+                            );
+                          })()}
+                          
+                          <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                          {renderAttachments(m.attachments)}
                         </div>
+
+                        {/* Actions (Reply/React) - Visible on Hover */}
+                        <div className={`absolute top-1/2 -translate-y-1/2 opacity-0 group-hover/msg:opacity-100 transition-opacity flex gap-1 ${isMine ? 'right-full mr-2' : 'left-full ml-2'}`}>
+                           <button 
+                             onClick={() => setReplyTo(m)}
+                             className="p-1.5 rounded-full bg-neutral-100 hover:bg-neutral-200 text-neutral-500 hover:text-neutral-900 shadow-sm"
+                           >
+                             <Reply className="h-3.5 w-3.5" />
+                           </button>
+                           <button 
+                             onClick={() => setMenuFor(menuFor === m.id ? null : m.id)}
+                             className="p-1.5 rounded-full bg-neutral-100 hover:bg-neutral-200 text-neutral-500 hover:text-neutral-900 shadow-sm"
+                           >
+                             <Smile className="h-3.5 w-3.5" />
+                           </button>
+                        </div>
+
+                        {/* Reaction Menu */}
+                        {menuFor === m.id && (
+                          <div className={`absolute z-20 flex gap-1 p-1.5 bg-white rounded-full shadow-lg border border-neutral-200 ${isMine ? 'right-0 top-full mt-1' : 'left-0 top-full mt-1'}`}>
+                             {["👍","❤️","😂","😮","😢"].map(emoji => (
+                               <button 
+                                 key={emoji}
+                                 onClick={() => { toggleReaction(m.id, emoji); setMenuFor(null); }}
+                                 className="hover:scale-125 transition-transform text-lg px-1"
+                               >
+                                 {emoji}
+                               </button>
+                             ))}
+                          </div>
+                        )}
                       </div>
+
+                      {/* Reactions Display */}
+                      {Object.keys(reacts).length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1.5">
+                          {Object.entries(reacts).map(([emoji, users]) => {
+                            const iReacted = me ? users.includes(me) : false;
+                            return (
+                              <button
+                                key={emoji}
+                                onClick={() => toggleReaction(m.id, emoji)}
+                                className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold border transition-colors ${
+                                  iReacted 
+                                    ? "bg-neutral-800 text-white border-neutral-800" 
+                                    : "bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300"
+                                }`}
+                                title={users.map(u => displayName(u)).join(", ")}
+                              >
+                                <span>{emoji}</span>
+                                <span>{users.length}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      
+                      {/* Timestamp (only for own or last in group) */}
+                      {isMine && (
+                         <div className="mt-1 text-[9px] font-medium text-neutral-300 mr-1">
+                            {relTime(m.created_at)}
+                         </div>
+                      )}
                     </div>
-                  </li>
+                  </div>
                 );
               })}
-              <div ref={bottomRef} />
-            </ul>
+              <div ref={bottomRef} className="h-2" />
+            </>
           )}
         </div>
       </div>
 
       {/* Typing Indicator */}
       {someoneTyping && (
-        <div className="mt-1 text-xs text-white/85 italic">{someoneTyping} is typing…</div>
+        <div className="absolute bottom-[70px] left-4 z-10 animate-in fade-in slide-in-from-bottom-2">
+           <div className="bg-white/90 backdrop-blur rounded-full px-3 py-1.5 text-xs font-medium text-neutral-500 shadow-sm border border-neutral-100 flex items-center gap-2">
+              <div className="flex gap-0.5">
+                <span className="w-1 h-1 bg-neutral-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                <span className="w-1 h-1 bg-neutral-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                <span className="w-1 h-1 bg-neutral-400 rounded-full animate-bounce"></span>
+              </div>
+              {someoneTyping} is typing...
+           </div>
+        </div>
       )}
 
       {/* Input Area */}
-      <div className="mt-3 space-y-2 rounded-2xl border border-white/30 bg-white/90 p-3 shadow-lg backdrop-blur-sm">
+      <div className="border-t border-neutral-100 bg-white p-3 sm:p-4">
         {replyTo && (
-          <div className="flex items-center justify-between rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-700">
-            <div className="truncate">
-              Replying to <span className="font-medium">{displayName(replyTo.user_id)}</span> — {replyTo.content.slice(0, 80)}
+          <div className="mb-2 flex items-center justify-between rounded-lg bg-neutral-50 border border-neutral-100 px-3 py-2 text-xs">
+            <div className="flex items-center gap-2">
+               <Reply className="h-3 w-3 text-neutral-400" />
+               <span className="text-neutral-500">Replying to <span className="font-bold text-neutral-800">{displayName(replyTo.user_id)}</span></span>
             </div>
-            <button onClick={() => setReplyTo(null)} className="ml-2 text-xs text-rose-500 underline">cancel</button>
+            <button onClick={() => setReplyTo(null)} className="p-1 hover:bg-neutral-200 rounded-full"><X className="h-3 w-3 text-neutral-500" /></button>
           </div>
         )}
         
         {files.length > 0 && (
-          <div className="flex flex-wrap gap-2 text-xs">
+          <div className="mb-2 flex gap-2 overflow-x-auto pb-2">
             {files.map((f, i) => (
-              <div key={i} className="rounded-full border border-neutral-200 bg-white px-3 py-1 shadow-sm">{f.name} ({Math.round(f.size/1024)} KB)</div>
+              <div key={i} className="flex items-center gap-2 rounded-lg bg-neutral-50 px-3 py-2 text-xs font-medium text-neutral-700 border border-neutral-100">
+                <Paperclip className="h-3 w-3" />
+                <span className="max-w-[100px] truncate">{f.name}</span>
+                <button onClick={() => setFiles(prev => prev.filter((_, idx) => idx !== i))}><X className="h-3 w-3 hover:text-red-500" /></button>
+              </div>
             ))}
           </div>
         )}
         
-        <div className="flex items-center gap-2">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-            onPaste={onPaste}
-            placeholder="Message..."
-            className="flex-1 rounded-full border border-neutral-200 bg-white px-4 py-3 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-rose-400/60"
-            maxLength={4000}
-          />
-          <label className="grid h-11 w-11 place-items-center rounded-full border border-neutral-200 bg-white text-neutral-600 shadow-sm hover:bg-neutral-50 cursor-pointer">
-            📎
+        <div className="flex items-end gap-2">
+          <label className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full bg-neutral-50 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 transition-colors">
+            <Paperclip className="h-5 w-5" />
             <input type="file" multiple className="hidden" onChange={(e) => setFiles(prev => [...prev, ...Array.from(e.target.files || [])])} />
           </label>
+          
+          <div className="relative flex-1">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+              onPaste={onPaste}
+              placeholder="Type a message..."
+              rows={1}
+              className="w-full resize-none rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 focus:border-neutral-300 focus:bg-white focus:outline-none focus:ring-0 max-h-32 transition-all"
+              style={{ minHeight: '42px' }}
+            />
+          </div>
+
           <button 
             onClick={send} 
             disabled={sending || uploading || (input.trim().length === 0 && files.length === 0)}
-            className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-r from-rose-500 to-fuchsia-600 text-white shadow-lg transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-60 disabled:scale-100"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-white shadow-sm hover:bg-black disabled:bg-neutral-200 disabled:text-neutral-400 transition-all active:scale-95"
           >
-            {uploading ? "…" : "➤"}
+            {uploading || sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4 ml-0.5" />}
           </button>
         </div>
-        <div className="text-[11px] text-neutral-500">Tip: drag & drop or paste images/files into the chat.</div>
       </div>
     </div>
   );

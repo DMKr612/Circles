@@ -2,16 +2,16 @@ import { useEffect, useState, useRef, lazy, Suspense } from "react";
 import { supabase } from "@/lib/supabase";
 import { useNavigate } from "react-router-dom";
 import { useLocation } from "react-router-dom";
-import { MessageSquare, Users, User, ArrowLeft, Send, Search as SearchIcon, Filter } from "lucide-react";
+import { MessageSquare, Users, ArrowLeft, Send, Search as SearchIcon, Filter, Heart } from "lucide-react";
 import Spinner from "@/components/ui/Spinner";
-import ViewOtherProfileModal from "@/components/ViewOtherProfileModal"; // 1. Import Modal
+import ViewOtherProfileModal from "@/components/ViewOtherProfileModal";
 
 // Lazy load the existing group chat component
 const ChatPanel = lazy(() => import("../components/ChatPanel"));
 
 type ChatItem = {
   type: 'group' | 'dm';
-  id: string; // group_id or friend_user_id
+  id: string; 
   name: string;
   avatar_url: string | null;
   subtitle: string;
@@ -37,7 +37,7 @@ export default function Chats() {
   const [selected, setSelected] = useState<ChatItem | null>(null);
 
   // Profile Modal State
-  const [viewProfileId, setViewProfileId] = useState<string | null>(null); // 2. Add State
+  const [viewProfileId, setViewProfileId] = useState<string | null>(null);
 
   // DM Specific State
   const [dmMessages, setDmMessages] = useState<DMMsg[]>([]);
@@ -54,6 +54,9 @@ export default function Chats() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       setMe(user.id);
+
+      // Load Favorites from LocalStorage
+      const favs = new Set(JSON.parse(localStorage.getItem("chat_favorites") || "[]"));
 
       // Fetch Groups
       const { data: groups } = await supabase
@@ -80,7 +83,8 @@ export default function Chats() {
               id: g.groups.id,
               name: g.groups.title,
               avatar_url: null,
-              subtitle: g.groups.category || 'Group'
+              subtitle: g.groups.category || 'Group',
+              isFavorite: favs.has(g.groups.id)
             });
           }
         });
@@ -103,18 +107,56 @@ export default function Chats() {
               id: p.user_id,
               name: p.name || "User",
               avatar_url: p.avatar_url,
-              subtitle: "Direct Message"
+              subtitle: "Direct Message",
+              isFavorite: favs.has(p.user_id)
             });
           });
         }
       }
 
-      items.sort((a, b) => a.name.localeCompare(b.name));
+      items.sort((a, b) => {
+        // Sort favorites to top, then alphabetical
+        if (a.isFavorite && !b.isFavorite) return -1;
+        if (!a.isFavorite && b.isFavorite) return 1;
+        return a.name.localeCompare(b.name);
+      });
       setList(items);
       setLoading(false);
     }
     load();
   }, []);
+
+  // Toggle Favorite Handler
+  const toggleFavorite = (id: string) => {
+    const favs = new Set(JSON.parse(localStorage.getItem("chat_favorites") || "[]"));
+    let isFav = false;
+    
+    if (favs.has(id)) {
+      favs.delete(id);
+      isFav = false;
+    } else {
+      favs.add(id);
+      isFav = true;
+    }
+    
+    // Persist
+    localStorage.setItem("chat_favorites", JSON.stringify(Array.from(favs)));
+
+    // Update List State
+    setList(prev => prev.map(item => 
+      item.id === id ? { ...item, isFavorite: isFav } : item
+    ).sort((a, b) => {
+        // Re-sort on toggle
+        if (a.isFavorite && !b.isFavorite) return -1;
+        if (!a.isFavorite && b.isFavorite) return 1;
+        return a.name.localeCompare(b.name);
+    }));
+
+    // Update Selected State if active
+    if (selected && selected.id === id) {
+      setSelected(prev => prev ? { ...prev, isFavorite: isFav } : null);
+    }
+  };
 
   // Auto-select DM if location.state?.openDmId is provided
   useEffect(() => {
@@ -131,12 +173,14 @@ export default function Chats() {
             .eq("user_id", openId)
             .single();
           if (p) {
+            const favs = new Set(JSON.parse(localStorage.getItem("chat_favorites") || "[]"));
             const newChat: ChatItem = {
               type: "dm",
               id: openId,
               name: p.name || "User",
               avatar_url: p.avatar_url,
               subtitle: "Direct Message",
+              isFavorite: favs.has(openId)
             };
             setList((prev) => [newChat, ...prev]);
             setSelected(newChat);
@@ -257,6 +301,7 @@ export default function Chats() {
           <FilterPill id="all" label="All" />
           <FilterPill id="groups" label="Groups" />
           <FilterPill id="private" label="Private" />
+          <FilterPill id="fav" label="Favorites" />
         </div>
       </div>
 
@@ -274,37 +319,57 @@ export default function Chats() {
         ) : (
           <div className="px-2 py-2 space-y-1">
             {filteredList.map(item => (
-              <button
-                key={item.type + item.id}
-                onClick={() => setSelected(item)}
-                className={`
-                  w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all duration-200
-                  ${selected?.id === item.id 
-                    ? 'bg-emerald-50 shadow-sm ring-1 ring-emerald-100' 
-                    : 'hover:bg-neutral-50'}
-                `}
+              // THIS IS THE LIST ITEM
+              <div 
+                key={item.type + item.id} 
+                className="group relative"
               >
-                <div className={`
-                  h-12 w-12 rounded-full flex items-center justify-center text-lg font-bold shrink-0 shadow-sm
-                  ${item.type === 'group' 
-                    ? 'bg-gradient-to-br from-indigo-100 to-indigo-200 text-indigo-700' 
-                    : 'bg-gradient-to-br from-neutral-100 to-neutral-200 text-neutral-600'}
-                `}>
-                  {item.type === 'dm' && item.avatar_url ? (
-                    <img src={item.avatar_url} alt="" className="h-full w-full object-cover rounded-full" />
-                  ) : (
-                    item.type === 'group' ? <Users className="h-5 w-5" /> : item.name.slice(0,1).toUpperCase()
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className={`font-semibold truncate ${selected?.id === item.id ? 'text-emerald-900' : 'text-neutral-900'}`}>
-                    {item.name}
+                <button
+                  onClick={() => setSelected(item)}
+                  className={`
+                    w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all duration-200
+                    ${selected?.id === item.id 
+                      ? 'bg-emerald-50 shadow-sm ring-1 ring-emerald-100' 
+                      : 'hover:bg-neutral-50'}
+                  `}
+                >
+                  <div className={`
+                    h-12 w-12 rounded-full flex items-center justify-center text-lg font-bold shrink-0 shadow-sm
+                    ${item.type === 'group' 
+                      ? 'bg-gradient-to-br from-indigo-100 to-indigo-200 text-indigo-700' 
+                      : 'bg-gradient-to-br from-neutral-100 to-neutral-200 text-neutral-600'}
+                  `}>
+                    {item.type === 'dm' && item.avatar_url ? (
+                      <img src={item.avatar_url} alt="" className="h-full w-full object-cover rounded-full" />
+                    ) : (
+                      item.type === 'group' ? <Users className="h-5 w-5" /> : item.name.slice(0,1).toUpperCase()
+                    )}
                   </div>
-                  <div className="text-xs text-neutral-500 truncate mt-0.5">
-                    {item.subtitle}
+                  <div className="min-w-0 flex-1 pr-8">
+                    <div className={`font-semibold truncate ${selected?.id === item.id ? 'text-emerald-900' : 'text-neutral-900'}`}>
+                      {item.name}
+                    </div>
+                    <div className="text-xs text-neutral-500 truncate mt-0.5">
+                      {item.subtitle}
+                    </div>
                   </div>
-                </div>
-              </button>
+                </button>
+
+                {/* HEART BUTTON IN LIST - VISIBLE ON HOVER OR IF FAVORITED */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); toggleFavorite(item.id); }}
+                  className={`
+                    absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-full transition-all duration-200
+                    hover:bg-white hover:shadow-sm
+                    ${item.isFavorite 
+                      ? 'opacity-100 text-rose-500' 
+                      : 'opacity-0 group-hover:opacity-100 text-neutral-300 hover:text-rose-400'}
+                  `}
+                  title={item.isFavorite ? "Remove from Favorites" : "Add to Favorites"}
+                >
+                  <Heart className={`h-4 w-4 ${item.isFavorite ? 'fill-current' : ''}`} />
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -333,7 +398,7 @@ export default function Chats() {
       if (selected.type === 'group') {
         navigate(`/group/${selected.id}`);
       } else if (selected.type === 'dm') {
-        setViewProfileId(selected.id); // <--- OPEN MODAL INSTEAD OF NAVIGATE
+        setViewProfileId(selected.id);
       }
     };
 
@@ -366,6 +431,16 @@ export default function Chats() {
               </div>
             </div>
           </div>
+
+          <button 
+            onClick={() => toggleFavorite(selected.id)}
+            className="p-2 rounded-full hover:bg-neutral-100 transition-colors focus:outline-none focus:ring-2 focus:ring-neutral-200"
+            title={selected.isFavorite ? "Remove from Favorites" : "Add to Favorites"}
+          >
+            <Heart 
+              className={`h-5 w-5 transition-colors ${selected.isFavorite ? 'fill-rose-500 text-rose-500' : 'text-neutral-400'}`} 
+            />
+          </button>
         </div>
 
         {/* Content Area */}
