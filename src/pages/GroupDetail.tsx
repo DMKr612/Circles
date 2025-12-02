@@ -1,19 +1,16 @@
 import { useEffect, useState, useMemo, lazy, Suspense } from "react";
 import { useParams, useNavigate, Link, useLocation } from "react-router-dom";
-// Changed absolute import to relative to fix build error
 import { supabase } from "../lib/supabase";
 import type { Group, Poll, PollOption, GroupMember } from "../types";
 import { 
   MapPin, Users, Calendar, Clock, Share2, MessageCircle, 
-  LogOut, Trash2, Edit2, Check, X, Plus, ChevronLeft 
+  LogOut, Trash2, Edit2, Check, X, Plus, ChevronLeft, AlertCircle 
 } from "lucide-react";
-
-// Changed absolute import to relative to fix build error
+import ViewOtherProfileModal from "../components/ViewOtherProfileModal";
 import { useGroupPresence } from "../hooks/useGroupPresence";
 
 const ChatPanel = lazy(() => import("../components/ChatPanel"));
 
-// FIX: Extend the type locally to include avatar_url and prevent red lines
 interface MemberDisplay extends GroupMember {
   name: string | null;
   avatar_url: string | null;
@@ -29,7 +26,6 @@ export default function GroupDetail() {
   const [msg, setMsg] = useState<string | null>(null);
   const [me, setMe] = useState<string | null>(null);
   
-  // FIX: Convert 'null' to 'undefined' to satisfy TypeScript
   const { isTogether } = useGroupPresence(id, me ?? undefined);
   
   const [copied, setCopied] = useState(false);
@@ -42,6 +38,8 @@ export default function GroupDetail() {
   const [chatFull, setChatFull] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false); 
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   
   // Edit Description State
   const [isEditingDesc, setIsEditingDesc] = useState(false);
@@ -58,7 +56,6 @@ export default function GroupDetail() {
   const [votedCount, setVotedCount] = useState<number>(0);
   const [votingBusy, setVotingBusy] = useState<string | null>(null);
   
-  // FIX: Use the extended type here
   const [members, setMembers] = useState<MemberDisplay[]>([]);
   const [isMember, setIsMember] = useState(false);
 
@@ -131,7 +128,6 @@ export default function GroupDetail() {
         .eq('status', 'active')
         .order('created_at', { ascending: true });
 
-      // FIX: Map the profile data correctly to the extended type
       const arr: MemberDisplay[] = (data ?? []).map((r: any) => ({
         user_id: r.user_id,
         role: r.role,
@@ -189,6 +185,7 @@ export default function GroupDetail() {
   // --- Actions ---
 
   async function joinGroup() {
+    setMsg(null);
     const { data: auth } = await supabase.auth.getUser();
     if (!auth.user) { setMsg("Please sign in."); return; }
     await supabase.from("group_members").insert({ group_id: id, user_id: auth.user.id });
@@ -197,6 +194,7 @@ export default function GroupDetail() {
   }
 
   async function leaveGroup() {
+    setMsg(null);
     if (!group || !me) return;
     if (me === group.host_id) { setMsg("Host cannot leave their own group."); return; }
     await supabase.from("group_members").delete().match({ group_id: group.id, user_id: me });
@@ -212,6 +210,7 @@ export default function GroupDetail() {
   }
 
   async function createInvite() {
+    setMsg(null);
     if (!group?.id) return;
     setShareBusy(true);
     try {
@@ -240,6 +239,7 @@ export default function GroupDetail() {
   }
 
   async function saveDescription() {
+    setMsg(null);
     if (!group || !isHost) return;
     setEditBusy(true);
     try {
@@ -257,6 +257,7 @@ export default function GroupDetail() {
   // --- Voting Logic ---
 
   async function confirmCreateVoting() {
+    setMsg(null);
     if (!group || !isHost) return;
     const { data: auth } = await supabase.auth.getUser();
     if (!auth?.user) return;
@@ -286,18 +287,22 @@ export default function GroupDetail() {
       .single();
       
     if (pErr || !created?.id) { 
-        console.error(pErr);
-        setMsg("Failed to create poll. Check permissions."); 
+        console.error("Poll create error:", pErr);
+        setMsg(pErr?.message || "Failed to create poll. Check permissions."); 
         return; 
     }
 
     if (labels.length) {
       const rows = labels.map(label => ({ poll_id: created.id, label }));
-      await supabase.from("group_poll_options").insert(rows);
+      const { error: optError } = await supabase.from("group_poll_options").insert(rows);
+      if (optError) {
+         console.error("Option create error:", optError);
+         setMsg("Poll created but failed to add options.");
+      }
     }
 
     setCreateOpen(false);
-    setMsg("Voting created");
+    setMsg(null); // Clear error on success
     setPoll({ 
         id: created.id, group_id: group.id, 
         title: newTitle, status: "open", 
@@ -308,13 +313,13 @@ export default function GroupDetail() {
   }
 
   async function finalizePoll() {
+    setMsg(null);
     if (!poll || !isHost) return;
     if (!window.confirm("End voting? Everyone who hasn't voted will be marked as 'Not Coming'.")) return;
     setVotingBusy("closing");
     try {
       await supabase.rpc('resolve_poll', { p_poll_id: poll.id });
       setPoll(prev => prev ? { ...prev, status: 'closed' } : prev);
-      setMsg("Poll finalized.");
     } catch (e: any) {
       setMsg(e.message);
     } finally {
@@ -323,16 +328,15 @@ export default function GroupDetail() {
   }
 
   async function deleteVoting() {
+    setMsg(null);
     if (!poll) return;
     if (!window.confirm("Delete this voting?")) return;
-    // FIX: Add error handling for delete
     const { error } = await supabase.from("group_polls").delete().eq("id", poll.id);
     if (error) {
         setMsg("Could not delete. Check database permissions.");
         console.error(error);
     } else {
         setPoll(null);
-        setMsg("Poll deleted.");
     }
   }
 
@@ -342,10 +346,17 @@ export default function GroupDetail() {
     const { data: auth } = await supabase.auth.getUser();
     if (!auth?.user) { nav("/login"); return; }
 
-    await supabase.from("group_votes").upsert(
+    const { error } = await supabase.from("group_votes").upsert(
         { poll_id: poll.id, option_id: optionId, user_id: auth.user.id },
         { onConflict: "poll_id,user_id" }
     );
+    
+    if (error) {
+        console.error(error);
+        setMsg("Failed to save vote");
+        setVotingBusy(null);
+        return;
+    }
 
     const { data: votesRows } = await supabase.from("group_votes").select("option_id,user_id").eq("poll_id", poll.id);
     const map: Record<string, number> = {};
@@ -427,6 +438,17 @@ export default function GroupDetail() {
                 </div>
             </div>
         </div>
+        
+        {/* GLOBAL ERROR MESSAGE */}
+        {msg && !createOpen && (
+            <div className="mx-auto max-w-5xl px-4 mt-4">
+               <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm font-bold flex items-center gap-2 shadow-sm animate-in fade-in slide-in-from-top-2">
+                  <AlertCircle className="h-4 w-4" />
+                  {msg}
+                  <button onClick={() => setMsg(null)} className="ml-auto hover:bg-red-100 p-1 rounded-full"><X className="h-3 w-3" /></button>
+               </div>
+            </div>
+        )}
 
         {/* MAIN CONTENT GRID */}
         <div className="mx-auto max-w-5xl px-4 py-8 grid gap-8 lg:grid-cols-[2fr_1fr]">
@@ -522,7 +544,7 @@ export default function GroupDetail() {
                            Polls & Events
                         </h2>
                         {isHost && (
-                            <button onClick={() => setCreateOpen(true)} className="p-1.5 bg-neutral-50 rounded-full text-neutral-600 shadow-sm hover:scale-105 active:scale-95 transition-all border border-neutral-200 hover:bg-white hover:border-neutral-300">
+                            <button onClick={() => { setMsg(null); setCreateOpen(true); }} className="p-1.5 bg-neutral-50 rounded-full text-neutral-600 shadow-sm hover:scale-105 active:scale-95 transition-all border border-neutral-200 hover:bg-white hover:border-neutral-300">
                                 <Plus className="h-4 w-4" />
                             </button>
                         )}
@@ -531,7 +553,7 @@ export default function GroupDetail() {
                     {!poll ? (
                         <div className="text-center py-8 px-4 bg-neutral-50 rounded-xl border border-dashed border-neutral-200">
                             <p className="text-sm text-neutral-400 mb-2 font-medium">No active polls</p>
-                            {isHost && <button onClick={() => setCreateOpen(true)} className="text-xs text-black font-bold hover:underline">Create one</button>}
+                            {isHost && <button onClick={() => { setMsg(null); setCreateOpen(true); }} className="text-xs text-black font-bold hover:underline">Create one</button>}
                         </div>
                     ) : (
                         <div className="animate-in slide-in-from-bottom-2 duration-500">
@@ -586,7 +608,7 @@ export default function GroupDetail() {
                                     )}
                                     {poll.status === 'closed' && (
                                         <button 
-                                            onClick={() => setCreateOpen(true)} 
+                                            onClick={() => { setMsg(null); setCreateOpen(true); }} 
                                             className="w-full bg-neutral-100 text-neutral-700 text-xs font-bold py-3 rounded-xl hover:bg-neutral-200 flex items-center justify-center gap-2"
                                         >
                                             <Plus className="h-4 w-4" /> Create New Vote
@@ -638,6 +660,14 @@ export default function GroupDetail() {
                 <button onClick={() => setCreateOpen(false)} className="p-1 rounded-full hover:bg-neutral-100 text-neutral-500"><X className="h-5 w-5" /></button>
             </div>
             
+            {/* ERROR IN MODAL */}
+            {msg && (
+              <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-xl text-sm font-bold border border-red-100 flex items-center gap-2 animate-in slide-in-from-top-1">
+                 <AlertCircle className="h-4 w-4 shrink-0" />
+                 <span>{msg}</span>
+              </div>
+            )}
+            
             <div className="space-y-4">
                 <div>
                     <label className="block text-xs font-bold text-neutral-400 uppercase mb-1.5">Topic</label>
@@ -685,7 +715,14 @@ export default function GroupDetail() {
             
             <div className="flex-1 overflow-y-auto pr-2 space-y-2">
                {members.map((m) => (
-                 <div key={m.user_id} className="flex items-center justify-between p-2 rounded-xl hover:bg-neutral-50 transition-colors">
+                 <div
+  key={m.user_id}
+  onClick={() => {
+    setSelectedUserId(m.user_id);
+    setShowProfileModal(true);
+  }}
+  className="flex items-center justify-between p-2 rounded-xl hover:bg-neutral-50 transition-colors cursor-pointer"
+>
                     <div className="flex items-center gap-3">
                        <div className="h-10 w-10 rounded-full bg-neutral-200 flex items-center justify-center overflow-hidden">
                           {m.avatar_url ? (
@@ -727,6 +764,11 @@ export default function GroupDetail() {
         </div>
       )}
 
+      <ViewOtherProfileModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+         viewUserId={selectedUserId}
+      />
       {/* Chat Panel - WRAPPED IN MODAL */}
       {chatOpen && group && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 animate-in zoom-in-95 duration-200">
