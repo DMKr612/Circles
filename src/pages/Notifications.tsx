@@ -29,12 +29,18 @@ export default function NotificationsPage() {
       const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
 
       try {
-        const { data: fr } = await supabase
-          .from("friendships" as any)
-          .select("id, user_id_a, created_at, profiles!friendships_user_id_a_fkey(name, avatar_url)")
-          .eq("user_id_b", userId)
-          .eq("status", "pending")
-          .gt("created_at", twoWeeksAgo);
+        const { data: rpcData } = await supabase.rpc("get_my_friend_requests");
+
+        const friendRequests = (rpcData || []).map((r: any) => ({
+          id: r.id,
+          // We map sender_id to user_id_a so the existing Accept button works
+          user_id_a: r.sender_id, 
+          created_at: r.created_at,
+          profiles: {
+            name: r.sender_name,
+            avatar_url: r.sender_avatar
+          }
+        }));
 
         const { data: inv } = await supabase
           .from("group_members" as any)
@@ -75,7 +81,7 @@ export default function NotificationsPage() {
           fetchedMsgs = m || [];
         }
 
-        setFriendReqs(fr || []);
+        setFriendReqs(friendRequests || []);
         setInvites(inv || []);
         setPolls(fetchedPolls);
         setMessages(fetchedMsgs);
