@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { Users, Calendar, MessageSquare, UserPlus, UserCheck, X, AlertTriangle } from "lucide-react";
+import { Users, Calendar, MessageSquare, UserPlus, UserCheck, UserMinus, X, AlertTriangle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 const toast = (msg: string) => alert(msg);
@@ -239,8 +239,15 @@ export default function ViewOtherProfileModal({ isOpen, onClose, viewUserId }: V
           )}
 
           {viewFriendStatus === 'accepted' && (
-            <button onClick={() => handleFriendAction('remove')} className="flex-1 py-2 rounded-xl bg-neutral-200 text-neutral-600 text-sm font-bold flex items-center justify-center gap-2">
-              <UserCheck className="h-4 w-4" /> Friends
+            <button
+              onClick={() => {
+                if (window.confirm("Are you sure you want to unfriend this user?")) {
+                  handleFriendAction('remove');
+                }
+              }}
+              className="flex-1 py-2 rounded-xl bg-neutral-100 text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 text-sm font-bold flex items-center justify-center gap-2 transition-all"
+            >
+              <UserMinus className="h-4 w-4" /> Unfriend
             </button>
           )}
 
