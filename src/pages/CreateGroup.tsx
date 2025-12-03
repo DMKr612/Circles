@@ -144,28 +144,34 @@ async function refreshFriendData(userId: string) {
     let mounted = true;
     (async () => {
       setListsLoading(true);
+
+      // allowed_categories: schema has `name`, not `id`
       const { data: c } = await supabase
         .from("allowed_categories")
-        .select("id")
+        .select("name")
         .eq("is_active", true);
 
+      // allowed_games: schema has `id, name, category`
       const { data: g } = await supabase
         .from("allowed_games")
-        .select("id, category")
+        .select("id, name, category")
         .eq("is_active", true);
 
       if (!mounted) return;
 
-      setCats((c ?? []).map((x: { id: string }) => ({ name: x.id })));
+      setCats((c ?? []).map((x: { name: string }) => ({ name: x.name })));
 
-      setOpts((g ?? []).map((x: { id: string; category: string }) => ({
-        id: x.id,
-        label: x.id,
-        category: x.category
+      setOpts((g ?? []).map((x: { id: string; name: string; category: string }) => ({
+        id: x.id,                      // value stored in groups.game
+        label: x.name || x.id,         // human-readable label for UI
+        category: x.category,
       })));
+
       setListsLoading(false);
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   // Close category/game dropdowns when clicking outside
@@ -346,7 +352,7 @@ async function refreshFriendData(userId: string) {
     const cleanedCity = (cityCanonical ?? null);
     const row = {
       title: title.trim(),
-      purpose: (description.trim().replace(/\s+$/, '') || null),
+      description: (description.trim().replace(/\s+$/, "") || null),
       category: (category || "").toLowerCase(),
       game: gameId,                          // allowed_games.id
       city: cleanedCity,                     // <-- persist city to DB

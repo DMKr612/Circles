@@ -102,14 +102,14 @@ export default function GroupDetail() {
       const q = await supabase.from('groups').select('*').eq('id', id).maybeSingle();
       if (!ignore) setGroup((q.data as Group) ?? null);
       
-      if (q.data) setEditDescValue(q.data.purpose || "");
+            if (q.data) setEditDescValue((q.data as any).description || "");
 
       if (q.data?.id) {
         const { count } = await supabase
           .from('group_members')
           .select('*', { count: 'exact', head: true })
           .eq('group_id', q.data.id)
-          .eq('status', 'active');
+          .eq('status', 'accepted');
         if (!ignore) setMemberCount(count ?? 0);
       }
       setLoading(false);
@@ -121,22 +121,23 @@ export default function GroupDetail() {
     let off = false;
     (async () => {
       if (!group?.id) { setMembers([]); return; }
-      const { data } = await supabase
+            const { data } = await supabase
         .from('group_members')
         .select('user_id, role, created_at, status, group_id, profiles(name, avatar_url)')
         .eq('group_id', group.id)
-        .eq('status', 'active')
+        .eq('status', 'accepted')
         .order('created_at', { ascending: true });
 
       const arr: MemberDisplay[] = (data ?? []).map((r: any) => ({
-        user_id: r.user_id,
-        role: r.role,
-        created_at: r.created_at,
-        group_id: group.id,
-        status: 'active',
-        name: r.profiles?.name ?? "User",
-        avatar_url: r.profiles?.avatar_url ?? null
-      }));
+  user_id: r.user_id,
+  // Force host label in UI if this user is the group's host
+  role: r.user_id === group.host_id ? 'host' : r.role,
+  created_at: r.created_at,
+  group_id: group.id,
+  status: r.status ?? 'accepted',
+  name: r.profiles?.name ?? "User",
+  avatar_url: r.profiles?.avatar_url ?? null,
+}));
 
       if (off) return;
       setMembers(arr);
@@ -238,14 +239,17 @@ export default function GroupDetail() {
     nav("/browse");
   }
 
-  async function saveDescription() {
+    async function saveDescription() {
     setMsg(null);
     if (!group || !isHost) return;
     setEditBusy(true);
     try {
-      const { error } = await supabase.from("groups").update({ purpose: editDescValue }).eq("id", group.id);
+      const { error } = await supabase
+        .from("groups")
+        .update({ description: editDescValue })
+        .eq("id", group.id);
       if (error) throw error;
-      setGroup(prev => prev ? { ...prev, purpose: editDescValue } : null);
+      setGroup(prev => (prev ? { ...(prev as any), description: editDescValue } : null));
       setIsEditingDesc(false);
     } catch (e: any) {
       setMsg(e.message || "Failed to save description");
@@ -398,23 +402,33 @@ export default function GroupDetail() {
                         </h1>
                         
                         <div className="flex flex-wrap gap-2 items-center">
-                            <div className="inline-flex items-center gap-1.5 bg-neutral-100 text-neutral-700 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide">
-                                {group.category || "General"}
-                            </div>
-                            {group.game && (
-                                <div className="inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold">
-                                    {group.game}
-                                </div>
-                            )}
-                            {group.city && (
-                                <div className="inline-flex items-center gap-1.5 border border-neutral-200 text-neutral-600 px-3 py-1 rounded-full text-xs font-medium">
-                                    <MapPin className="h-3 w-3" /> {group.city}
-                                </div>
-                            )}
-                             <div className="inline-flex items-center gap-1.5 border border-neutral-200 text-neutral-600 px-3 py-1 rounded-full text-xs font-medium">
-                                    <Users className="h-3 w-3" /> {memberCount} / {group.capacity}
-                            </div>
-                        </div>
+    <div className="inline-flex items-center gap-1.5 bg-neutral-100 text-neutral-700 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide">
+        {group.category || "General"}
+    </div>
+    {group.game && (
+        <div className="inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold">
+            {group.game}
+        </div>
+    )}
+    {group.city && (
+        <div className="inline-flex items-center gap-1.5 border border-neutral-200 text-neutral-600 px-3 py-1 rounded-full text-xs font-medium">
+            <MapPin className="h-3 w-3" /> {group.city}
+        </div>
+    )}
+    {group.code && (
+        <button
+          type="button"
+          onClick={copyGroupCode}
+          className="inline-flex items-center gap-1.5 bg-neutral-900 text-white px-3 py-1 rounded-full text-xs font-mono cursor-pointer hover:bg-neutral-800 active:scale-95 transition-transform"
+          title={copied ? "Copied" : "Click to copy invite code"}
+        >
+          {String(group.code).toUpperCase()}
+        </button>
+    )}
+    <div className="inline-flex items-center gap-1.5 border border-neutral-200 text-neutral-600 px-3 py-1 rounded-full text-xs font-medium">
+        <Users className="h-3 w-3" /> {memberCount} / {group.capacity}
+    </div>
+</div>
                     </div>
 
                     {/* Main Actions */}
@@ -485,23 +499,14 @@ export default function GroupDetail() {
                                 </button>
                             </div>
                         </div>
-                    ) : (
+                                        ) : (
                         <p className="text-sm text-neutral-600 leading-relaxed whitespace-pre-wrap">
-                            {group.purpose || <span className="italic text-neutral-400">No description provided.</span>}
+                            {(group as any).description || (
+                              <span className="italic text-neutral-400">No description provided.</span>
+                            )}
                         </p>
                     )}
 
-                    {group.code && (
-                        <div className="mt-6 pt-4 border-t border-neutral-100 flex items-center gap-3">
-                            <span className="text-xs font-bold text-neutral-400 uppercase tracking-wider">Invite Code</span>
-                            <code className="text-sm font-mono bg-neutral-100 px-2 py-1 rounded text-neutral-700 border border-neutral-200">
-                                {String(group.code).toUpperCase()}
-                            </code>
-                            <button onClick={copyGroupCode} className="text-xs font-medium text-emerald-600 hover:underline">
-                                {copied ? "Copied" : "Copy"}
-                            </button>
-                        </div>
-                    )}
                 </section>
 
                 {/* Details Card */}

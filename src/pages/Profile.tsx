@@ -144,6 +144,39 @@ export default function Profile() {
     }
   }, [profile]);
 
+  // Recalculate groupsCreated based on groups where I am creator or host
+  useEffect(() => {
+    if (!uid) return;
+    (async () => {
+      const { count, error } = await supabase
+        .from('groups')
+        .select('id', { count: 'exact', head: true })
+        .or(`creator_id.eq.${uid},host_id.eq.${uid}`);
+      if (error) {
+        console.warn('Failed to load created groups count', error);
+        return;
+      }
+      setGroupsCreated(count ?? 0);
+    })();
+  }, [uid]);
+
+  // Recalculate groupsJoined based on group_members rows for me
+  useEffect(() => {
+    if (!uid) return;
+    (async () => {
+      const { count, error } = await supabase
+        .from('group_members')
+        .select('group_id', { count: 'exact', head: true })
+        .eq('user_id', uid)
+        .eq('status', 'accepted');
+      if (error) {
+        console.warn('Failed to load joined groups count', error);
+        return;
+      }
+      setGroupsJoined(count ?? 0);
+    })();
+  }, [uid]);
+
   // --- UI State ---
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
