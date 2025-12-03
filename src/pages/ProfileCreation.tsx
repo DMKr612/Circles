@@ -20,14 +20,14 @@ export default function ProfileCreation() {
     setError(null);
 
     const { error: dbError } = await supabase
-      .from("profiles")
-      .update({
-        full_name: fullName,
-        username,
-        onboarded: true, // make sure profiles has this boolean column
-      } as any)
-      .eq("user_id", user!.id);
-
+  .from("profiles")
+  .update({
+    name: fullName,   // <- use 'name', matches DB schema
+    username,
+    onboarded: true,
+  } as any)
+  .eq("user_id", user!.id);
+  
     setSaving(false);
 
     if (dbError) {
