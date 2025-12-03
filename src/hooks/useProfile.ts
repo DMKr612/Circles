@@ -20,8 +20,25 @@ export function useProfile(userId: string | null) {
     queryFn: async (): Promise<ProfileData> => {
       if (!userId) throw new Error("No user ID");
 
-      const [prof, created, joined] = await Promise.all([
-        supabase.from("profiles").select("*").eq("user_id", userId).single(),
+      // Fetch profile; if missing, create a default row so the app doesn't get stuck on "Loading"
+      const prof = await supabase.from("profiles").select("*").eq("user_id", userId).maybeSingle();
+      if (prof.error && prof.error.code !== "PGRST116") {
+        // Any error other than "no rows" should bubble up
+        throw prof.error;
+      }
+
+      let pData = prof.data;
+      if (!pData) {
+        const inserted = await supabase
+          .from("profiles")
+          .insert({ user_id: userId, name: "", onboarded: false })
+          .select("*")
+          .single();
+        if (inserted.error) throw inserted.error;
+        pData = inserted.data;
+      }
+
+      const [created, joined] = await Promise.all([
         supabase
           .from("group_members")
           .select("group_id", { count: "exact", head: true })
@@ -34,10 +51,6 @@ export function useProfile(userId: string | null) {
           .eq("user_id", userId)
           .eq("status", "active"),
       ]);
-
-      if (prof.error) throw prof.error;
-      const pData = prof.data;
-      if (!pData) throw new Error("Profile not found");
 
       return {
         id: userId,

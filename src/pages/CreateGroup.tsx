@@ -141,23 +141,49 @@ async function refreshFriendData(userId: string) {
   }, []);
 
   useEffect(() => {
-  let mounted = true;
-  (async () => {
-    setListsLoading(true);
-    const { data: c } = await supabase
-      .from("allowed_categories")
-      .select("name")
-      .eq("is_active", true);
-    const { data: g } = await supabase
-      .from("allowed_games")
-      .select("id,name,category")
-      .eq("is_active", true);
-    if (!mounted) return;
-    setCats(c ?? []);
-    setOpts((g ?? []).map((x: { id: string; name: string; category: string }) => ({ id: x.id, label: x.name, category: x.category })));
-    setListsLoading(false);
-  })();
-  return () => { mounted = false; }; 
+    let mounted = true;
+    (async () => {
+      setListsLoading(true);
+      const { data: c } = await supabase
+        .from("allowed_categories")
+        .select("id")
+        .eq("is_active", true);
+
+      const { data: g } = await supabase
+        .from("allowed_games")
+        .select("id, category")
+        .eq("is_active", true);
+
+      if (!mounted) return;
+
+      setCats((c ?? []).map((x: { id: string }) => ({ name: x.id })));
+
+      setOpts((g ?? []).map((x: { id: string; category: string }) => ({
+        id: x.id,
+        label: x.id,
+        category: x.category
+      })));
+      setListsLoading(false);
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  // Close category/game dropdowns when clicking outside
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      const target = e.target as HTMLElement;
+      const catBox = document.getElementById("cat-combobox");
+      const gameBox = document.getElementById("game-combobox");
+
+      if (catBox && !catBox.contains(target)) {
+        setCatOpen(false);
+      }
+      if (gameBox && !gameBox.contains(target)) {
+        setGameOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
 
@@ -331,12 +357,17 @@ async function refreshFriendData(userId: string) {
 
     const { data: created, error } = await supabase
       .from("groups")
-      .insert(row)
+      .insert([row])
       .select("id")
-      .single();
+      .maybeSingle();
 
     if (error) {
-      alert(error.message);
+      alert(String(error.message ?? "Unknown error"));
+      return;
+    }
+
+    if (!created?.id) {
+      alert("Group created but ID missing. Try refreshing.");
       return;
     }
 
@@ -416,7 +447,7 @@ async function refreshFriendData(userId: string) {
                 {/* Category combobox */}
                 <div>
                   <label className="block text-xs font-medium text-neutral-700">Category</label>
-                  <div className="relative mt-1">
+                  <div id="cat-combobox" className="relative mt-1">
                     <input
                       value={catOpen ? catQuery : category || ""}
                       onChange={(e) => {
@@ -456,7 +487,7 @@ async function refreshFriendData(userId: string) {
                 {/* Game/Activity combobox */}
                 <div>
                   <label className="block text-xs font-medium text-neutral-700">Game / Activity</label>
-                  <div className="relative mt-1">
+                  <div id="game-combobox" className="relative mt-1">
                     <input
                       value={
                         gameOpen

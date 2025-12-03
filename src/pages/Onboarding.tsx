@@ -61,15 +61,38 @@ export default function Onboarding() {
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event !== "SIGNED_IN" || !session?.user) return;
+
+      // mark onboarding completed
       localStorage.setItem("onboardingSeen", "1");
-      const ls = localStorage.getItem("postLoginRedirect");
-      const fromState = location?.state?.from as string | undefined;
-      const dest = ls || fromState || "/profile";
-      if (ls) localStorage.removeItem("postLoginRedirect");
-      navigate(dest, { replace: true });
+      // mark Supabase profile as onboarded = true
+      (async () => {
+        try {
+          await supabase
+            .from("profiles")
+            .update({ onboarded: true })
+            .eq("user_id", session.user.id);
+        } catch (err) {
+          console.error("Failed to update onboarding:", err);
+        }
+      })();
+
+      // avoid redirect loops
+      const previous = location?.state?.from;
+      const stored = localStorage.getItem("postLoginRedirect");
+      const dest = stored || previous || "/profile";
+
+      if (stored) localStorage.removeItem("postLoginRedirect");
+
+      // only navigate if NOT currently on onboarding
+      if (!location.pathname.includes("onboarding")) {
+        navigate(dest, { replace: true });
+      } else {
+        navigate("/profile", { replace: true });
+      }
     });
-    return () => { subscription.unsubscribe(); };
-  }, [location, navigate]);
+
+    return () => subscription.unsubscribe();
+  }, [location.pathname, location.state, navigate]);
 
   const isLast = index === SLIDES.length - 1;
 
