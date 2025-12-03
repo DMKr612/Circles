@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { Users, Calendar, MessageSquare, UserPlus, UserCheck, UserMinus, X, AlertTriangle } from "lucide-react";
+import { Users, Calendar, MessageSquare, UserPlus, UserCheck, UserMinus, X, AlertTriangle, Unlock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 const toast = (msg: string) => alert(msg);
@@ -252,8 +252,16 @@ export default function ViewOtherProfileModal({ isOpen, onClose, viewUserId }: V
           )}
 
           {viewFriendStatus === 'blocked' && (
-            <button disabled className="flex-1 py-2 rounded-xl bg-red-600 text-white text-sm font-bold flex items-center justify-center gap-2 cursor-not-allowed">
-              <AlertTriangle className="h-4 w-4" /> Blocked
+            <button 
+              onClick={() => {
+                if (window.confirm("Unblock this user? They will be able to request you again.")) {
+                  // 'remove' deletes the friendship row, effectively unblocking them
+                  handleFriendAction('remove');
+                }
+              }}
+              className="flex-1 py-2 rounded-xl bg-neutral-800 text-white text-sm font-bold flex items-center justify-center gap-2 hover:bg-neutral-900 transition-all"
+            >
+              <Unlock className="h-4 w-4" /> Unblock
             </button>
           )}
         </div>

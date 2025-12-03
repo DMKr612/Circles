@@ -18,8 +18,8 @@ export default function Layout() {
 
   return (
     <>
-      {/* Main content wrapper */}
-      <div className="pb-32"> 
+      {/* Main content wrapper with padding to avoid nav overlap */}
+      <div className="pb-[calc(64px+env(safe-area-inset-bottom))]"> 
         <Outlet />
       </div>
 
