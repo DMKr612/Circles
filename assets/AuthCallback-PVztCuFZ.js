@@ -1,1 +1,0 @@
-import{i as t,c as e}from"./react-Dymf0t1b.js";import{s}from"./index-DyIYOLOS.js";import"./supabase-BesQZUkt.js";function i(){const a=t();return e.useEffect(()=>{(async()=>(await s.auth.getSession(),a("/",{replace:!0})))()},[a]),null}export{i as default};
