@@ -1,0 +1,88 @@
+import React, { useState } from "react";
+import { supabase } from "@/lib/supabase"; // adjust path if your client is elsewhere
+import useAuth from "@/hooks/useAuth";
+
+export default function ProfileCreation() {
+  const { user } = useAuth();
+  const [fullName, setFullName] = useState("");
+  const [username, setUsername] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!user) {
+    // RequireAuth will redirect if not logged in
+    return null;
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+
+    const { error: dbError } = await supabase
+      .from("profiles")
+      .update({
+        full_name: fullName,
+        username,
+        onboarded: true, // make sure profiles has this boolean column
+      } as any)
+      .eq("user_id", user!.id);
+
+    setSaving(false);
+
+    if (dbError) {
+      setError(dbError.message);
+      return;
+    }
+
+    // After saving, go to normal profile page
+    window.location.href = "/profile";
+  }
+
+  return (
+    <div className="min-h-dvh flex items-center justify-center px-4 py-8 bg-neutral-50">
+      <div className="w-full max-w-md rounded-xl border border-black/10 bg-white p-6 shadow-sm">
+        <h1 className="text-xl font-semibold mb-2">Create your profile</h1>
+        <p className="text-sm text-neutral-600 mb-6">
+          Just a few details so Circles can find the best groups for you.
+        </p>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Full name</label>
+            <input
+              type="text"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-black focus:ring-1 focus:ring-black"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Username</label>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-black focus:ring-1 focus:ring-black"
+              required
+            />
+          </div>
+
+          {error && (
+            <p className="text-sm text-red-600">{error}</p>
+          )}
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="mt-2 w-full rounded-md bg-black px-3 py-2 text-sm font-medium text-white hover:bg-black/90 disabled:opacity-60"
+          >
+            {saving ? "Saving…" : "Save and continue"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}

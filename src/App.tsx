@@ -31,6 +31,7 @@ const CreateGroup = lazy(() => import("./pages/CreateGroup"));
 const GroupDetail = lazy(() => import("./pages/GroupDetail"));
 const Groups = lazy(() => import("./pages/Groups"));
 const Profile = lazy(() => import("./pages/Profile"));
+const ProfileCreation = lazy(() => import("./pages/ProfileCreation.tsx"));
 const GroupsByGame = lazy(() => import("./pages/groups/GroupsByGame"));
 const MyGroups = lazy(() => import("./pages/groups/MyGroups"));
 const Onboarding = lazy(() => import("./pages/Onboarding"));
@@ -110,16 +111,14 @@ function RequireAuth({ children }: PropsWithChildren): JSX.Element | null {
     return <Navigate to="/onboarding" replace state={{ from: loc.pathname }} />;
   }
 
-  // 3. If logged in but profile not onboarded, send to Onboarding
-  //    (Checking explicitly for false to avoid redirecting on undefined/null during fetch)
-  if (profile && profile.onboarded === false) {
-    // Avoid infinite loop if already on onboarding
-    if (loc.pathname !== "/onboarding") {
-        return <Navigate to="/onboarding" replace />;
-    }
+  // 3. If logged in but profile not created/onboarded, send to Profile Creation
+  //    We treat "no profile" or onboarded === false as needing setup.
+  const needsProfileSetup = !profile || profile.onboarded === false;
+  if (needsProfileSetup && loc.pathname !== "/profile-creation") {
+    return <Navigate to="/profile-creation" replace state={{ from: loc.pathname }} />;
   }
 
-  // 4. Authenticated & onboarded (or profile missing but auth valid)
+  // 4. Authenticated & onboarded (or profile intentionally missing but auth valid)
   return <>{children}</>;
 }
 
@@ -285,6 +284,16 @@ export default function App() {
                 <Route path="/legal" element={<Legal />} />
                 <Route path="/invite/:code" element={<JoinByCode />} />
                 <Route path="/auth/callback" element={<AuthCallback />} />
+
+                {/* Authenticated profile-creation flow without the main Layout */}
+                <Route
+                  path="/profile-creation"
+                  element={
+                    <RequireAuth>
+                      <ProfileCreation />
+                    </RequireAuth>
+                  }
+                />
 
                 <Route element={<RequireAuth><Layout /></RequireAuth>}>
                   <Route path="/browse" element={<BrowsePage />} />

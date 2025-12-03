@@ -277,11 +277,12 @@ export default function GroupDetail() {
 
     const { data: created, error: pErr } = await supabase
       .from("group_polls")
-      .insert({ 
-          group_id: group.id, 
-          title: (newTitle || "Schedule").trim(), 
+      .insert({
+          group_id: group.id,
+          title: (newTitle || "Schedule").trim(),
           created_by: auth.user.id,
-          closes_at: closesAt
+          closes_at: closesAt,
+          status: "open"
       })
       .select("id")
       .single();
