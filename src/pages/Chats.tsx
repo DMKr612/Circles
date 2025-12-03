@@ -20,9 +20,9 @@ type ChatItem = {
 
 type DMMsg = {
   id: string;
-  from_id: string;
-  to_id: string;
-  body: string;
+  sender: string;
+  receiver: string;
+  content: string;
   created_at: string;
 };
 
@@ -69,7 +69,7 @@ export default function Chats() {
       const { data: friends } = await supabase
         .from("friendships")
         .select("user_id_a, user_id_b")
-        .or(`user_id_a.eq.${user.id},user_id_b.eq.${user.id}`)
+        .or(`(user_id_a.eq.${user.id},user_id_b.eq.${user.id})`)
         .eq("status", "accepted");
 
       const items: ChatItem[] = [];
@@ -203,8 +203,8 @@ export default function Chats() {
       
       const { data } = await supabase
         .from("direct_messages")
-        .select("*")
-        .or(`and(from_id.eq.${me},to_id.eq.${otherId}),and(from_id.eq.${otherId},to_id.eq.${me})`)
+        .select("id, sender, receiver, content, created_at")
+        .or(`(sender.eq.${me},receiver.eq.${otherId}),(sender.eq.${otherId},receiver.eq.${me})`)
         .order("created_at", { ascending: true })
         .limit(100);
       
@@ -219,8 +219,8 @@ export default function Chats() {
           (payload) => {
             const newMsg = payload.new as DMMsg;
             const isMatch = 
-              (newMsg.from_id === me && newMsg.to_id === otherId) ||
-              (newMsg.from_id === otherId && newMsg.to_id === me);
+              (newMsg.sender === me && newMsg.receiver === otherId) ||
+              (newMsg.sender === otherId && newMsg.receiver === me);
 
             if (isMatch) {
               setDmMessages(prev => [...prev, newMsg]);
@@ -244,9 +244,9 @@ export default function Chats() {
     const text = dmInput.trim();
     setDmInput("");
     await supabase.from("direct_messages").insert({
-      from_id: me,
-      to_id: selected.id,
-      body: text
+      sender: me,
+      receiver: selected.id,
+      content: text
     });
   };
 
@@ -483,8 +483,8 @@ export default function Chats() {
                 )}
                 
                 {dmMessages.map((m, idx) => {
-                  const isMine = m.from_id === me;
-                  const showAvatar = !isMine && (idx === 0 || dmMessages[idx-1].from_id !== m.from_id);
+                  const isMine = m.sender === me;
+                  const showAvatar = !isMine && (idx === 0 || dmMessages[idx-1].sender !== m.sender);
                   
                   return (
                     <div key={m.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'} group animate-in fade-in slide-in-from-bottom-2 duration-300`}>
@@ -508,7 +508,7 @@ export default function Chats() {
                             ? 'bg-gradient-to-br from-emerald-500 to-emerald-600 text-white rounded-2xl rounded-tr-sm' 
                             : 'bg-white text-neutral-800 border border-neutral-100 rounded-2xl rounded-tl-sm'}
                         `}>
-                          {m.body}
+                          {m.content}
                           <div className={`text-[9px] mt-1 text-right opacity-70 ${isMine ? 'text-emerald-100' : 'text-neutral-400'}`}>
                             {new Date(m.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                           </div>

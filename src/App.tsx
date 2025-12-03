@@ -14,14 +14,14 @@ import {
   Route,
   Link,
   Navigate,
-  Outlet,
   useLocation,
   useParams,
 } from "react-router-dom";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "./lib/supabase";
-import { Home, Search, PlusSquare, User as UserIcon, HelpCircle } from "lucide-react"; // Modern icons
+import { Search, PlusSquare, User as UserIcon, HelpCircle } from "lucide-react"; // Modern icons
 import Layout from "@/components/Layout";
+import { useProfile } from "@/hooks/useProfile";
 
 
 // Pages (lazy imports)
@@ -92,15 +92,34 @@ function AuthProvider({ children }: PropsWithChildren) {
    ========================= */
 function RequireAuth({ children }: PropsWithChildren): JSX.Element | null {
   const { user, loading } = useAuth();
+  // Use the hook to check profile status (onboarded or not)
+  const { data: profile, isLoading: profileLoading } = useProfile(user?.id ?? null);
   const loc = useLocation();
-  if (loading) {
+
+  // 1. Wait while Auth or Profile is loading
+  if (loading || (user && profileLoading)) {
     return (
       <div className="grid min-h-dvh place-items-center text-sm text-neutral-600">
         Loading…
       </div>
     );
   }
-  if (!user) return <Navigate to="/onboarding" replace state={{ from: loc.pathname }} />;
+
+  // 2. If not logged in, send to Onboarding
+  if (!user) {
+    return <Navigate to="/onboarding" replace state={{ from: loc.pathname }} />;
+  }
+
+  // 3. If logged in but profile not onboarded, send to Onboarding
+  //    (Checking explicitly for false to avoid redirecting on undefined/null during fetch)
+  if (profile && profile.onboarded === false) {
+    // Avoid infinite loop if already on onboarding
+    if (loc.pathname !== "/onboarding") {
+        return <Navigate to="/onboarding" replace />;
+    }
+  }
+
+  // 4. Authenticated & onboarded (or profile missing but auth valid)
   return <>{children}</>;
 }
 
@@ -199,7 +218,7 @@ class AppErrorBoundary extends React.Component<
         </div>
       );
     }
-    return this.props.children as any;
+   return this.props.children as any;
   }
 }
 
@@ -209,6 +228,10 @@ class AppErrorBoundary extends React.Component<
 function GroupRedirect() {
   const { id } = useParams();
   return <Navigate to={`/group/${id}`} replace />;
+}
+
+function LandingRedirect() {
+  return <Navigate to="/onboarding" replace />;
 }
 
 /* =========================
@@ -257,7 +280,7 @@ export default function App() {
               }
             >
               <Routes>
-                <Route path="/" element={<Navigate to="/browse" replace />} />
+                <Route path="/" element={<LandingRedirect />} />
                 <Route path="/onboarding" element={<Onboarding />} />
                 <Route path="/legal" element={<Legal />} />
                 <Route path="/invite/:code" element={<JoinByCode />} />

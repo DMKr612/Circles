@@ -88,9 +88,9 @@ export type Thread = {
 
 export type DMMessage = {
   id: string;
-  from_id: string;
-  to_id: string;
-  body: string;
+  sender: string;
+  receiver: string;
+  content: string;
   created_at: string;
 };
 

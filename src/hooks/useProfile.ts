@@ -10,6 +10,7 @@ export type ProfileData = {
   rating_count: number;
   groups_created: number;
   groups_joined: number;
+  onboarded: boolean;
 };
 
 export function useProfile(userId: string | null) {
@@ -47,6 +48,7 @@ export function useProfile(userId: string | null) {
         rating_count: pData.rating_count || 0,
         groups_created: created.count || 0,
         groups_joined: joined.count || 0,
+        onboarded: Boolean(pData.onboarded),
       };
     },
   });
@@ -65,3 +67,5 @@ export function useUpdateProfile() {
     },
   });
 }
+
+export default useProfile;

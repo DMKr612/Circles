@@ -108,7 +108,13 @@ type FriendShipRow = {
   status: 'pending' | 'accepted' | 'blocked';
   requested_by: string;
 };
-type DMMessage = { id: string; from_id: string; to_id: string; body: string; created_at: string };
+type DMMessage = {
+  id: string;
+  sender: string;
+  receiver: string;
+  content: string;
+  created_at: string;
+};
 
 type ProfileStub = {
   name: string;
@@ -311,11 +317,12 @@ export default function Profile() {
     if (!uid) return;
 
     (async () => {
-      const { data: frs } = await supabase
+      const { data: frs, error: frErr } = await supabase
         .from("friendships")
         .select("id,user_id_a,user_id_b,status")
-        .eq("status", "accepted")
-        .or(`user_id_a.eq.${uid},user_id_b.eq.${uid}`);
+        .or(`and(user_id_a.eq.${uid},status.eq.accepted),and(user_id_b.eq.${uid},status.eq.accepted)`);
+
+      if (frErr) console.error("Friend load error:", frErr);
 
       setFriends((frs as FriendShipRow[]) || []);
 
@@ -384,8 +391,8 @@ export default function Profile() {
     setThreads(prev => prev.map(t => t.other_id === otherId ? { ...t, unread: false, last_from_me: true } : t));
     const { data: msgs } = await supabase
       .from("direct_messages")
-      .select("id,from_id,to_id,body,created_at")
-      .or(`and(from_id.eq.${uid},to_id.eq.${otherId}),and(from_id.eq.${otherId},to_id.eq.${uid})`)
+      .select("id,sender,receiver,content,created_at")
+      .or(`and(sender.eq.${uid},receiver.eq.${otherId}),and(sender.eq.${otherId},receiver.eq.${uid})`)
       .order("created_at", { ascending: true })
       .limit(200);
     setDmMsgs(msgs ?? []);
@@ -398,8 +405,8 @@ export default function Profile() {
     setDmInput("");
     const { data, error } = await supabase
       .from("direct_messages")
-      .insert({ from_id: uid, to_id: dmTargetId, body })
-      .select("id,from_id,to_id,body,created_at")
+      .insert({ sender: uid, receiver: dmTargetId, content: body })
+      .select("id,sender,receiver,content,created_at")
       .single();
     if (error) { setDmError(error.message); return; }
     if (data) {

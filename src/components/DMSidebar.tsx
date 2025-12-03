@@ -89,8 +89,8 @@ const DMSidebar = forwardRef<HTMLDivElement, DMSidebarProps>(
     
     const { data: msgs } = await supabase
       .from("direct_messages")
-      .select("id,from_id,to_id,body,created_at")
-      .or(`and(from_id.eq.${uid},to_id.eq.${otherId}),and(from_id.eq.${otherId},to_id.eq.${uid})`)
+      .select("id,sender,receiver,content,created_at")
+      .or(`(sender.eq.${uid},receiver.eq.${otherId}),(sender.eq.${otherId},receiver.eq.${uid})`)
       .order("created_at", { ascending: true })
       .limit(200);
     setDmMsgs(msgs ?? []);
@@ -103,8 +103,8 @@ const DMSidebar = forwardRef<HTMLDivElement, DMSidebarProps>(
     setDmInput("");
     const { data, error } = await supabase
       .from("direct_messages")
-      .insert({ from_id: uid, to_id: dmTargetId, body })
-      .select("id,from_id,to_id,body,created_at")
+      .insert({ sender: uid, receiver: dmTargetId, content: body })
+      .select("id,sender,receiver,content,created_at")
       .single();
     if (error) { setDmError(error.message); return; }
     if (data) {
@@ -263,9 +263,9 @@ const DMSidebar = forwardRef<HTMLDivElement, DMSidebarProps>(
               <div className="text-neutral-600">Say hi 👋</div>
             )}
             {!dmLoading && dmMsgs.map((m) => (
-              <div key={m.id} className={`mb-2 flex ${m.from_id === uid ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[85%] rounded-lg px-3 py-1.5 ${m.from_id === uid ? "bg-emerald-600 text-white" : "bg-neutral-100"}`}>
-                  {m.body}
+              <div key={m.id} className={`mb-2 flex ${m.sender === uid ? "justify-end" : "justify-start"}`}>
+                <div className={`max-w-[85%] rounded-lg px-3 py-1.5 ${m.sender === uid ? "bg-emerald-600 text-white" : "bg-neutral-100"}`}>
+                  {m.content}
                 </div>
               </div>
             ))}
