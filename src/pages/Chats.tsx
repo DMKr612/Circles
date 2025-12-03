@@ -63,7 +63,7 @@ export default function Chats() {
         .from("group_members")
         .select("group_id, groups(id, title, category)")
         .eq("user_id", user.id)
-        .eq("status", "active");
+        .eq("status", "accepted");
 
       // Fetch Friends
       const { data: friends } = await supabase

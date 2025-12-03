@@ -58,6 +58,7 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(true);
 
   // presence/typing minimal
@@ -138,7 +139,7 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
       setLoading(true);
       const { data, error } = await supabase
         .from("group_messages")
-        .select("id,group_id,user_id:author_id,content,created_at,parent_id,attachments")
+        .select("id,group_id,user_id:sender_id,content,created_at,parent_id,attachments")
         .eq("group_id", groupId)
         .order("created_at", { ascending: false })
         .limit(pageSize);
@@ -198,10 +199,11 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
     return () => { cancelled = false; supabase.removeChannel(ch); };
   }, [groupId]);
 
-  // Auto-scroll
+  // Auto-scroll: only scroll to bottom when not loading older history
   useEffect(() => {
+    if (loadingOlder) return;
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [msgs.length]);
+  }, [msgs.length, loadingOlder]);
 
   // realtime
   useEffect(() => {
@@ -215,7 +217,7 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
         const m: Message = {
           id: raw.id,
           group_id: raw.group_id,
-          user_id: raw.user_id ?? raw.author_id,
+          user_id: raw.user_id ?? raw.sender_id ?? raw.author_id,
           content: raw.content,
           created_at: raw.created_at,
           parent_id: raw.parent_id ?? null,
@@ -318,18 +320,24 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
 
   // pagination
   const loadOlder = async () => {
-    if (!earliestTs || !hasMore) return;
+    if (!earliestTs || !hasMore || loadingOlder) return;
+    setLoadingOlder(true);
     const { data, error } = await supabase
       .from("group_messages")
-      .select("id,group_id,user_id:author_id,content,created_at,parent_id,attachments")
+     .select("id,group_id,user_id:sender_id,content,created_at,parent_id,attachments")
       .eq("group_id", groupId)
       .lt("created_at", earliestTs as string)
       .order("created_at", { ascending: false })
       .limit(pageSize);
-    if (error) { console.error(error); return; }
+    if (error) {
+      console.error(error);
+      setLoadingOlder(false);
+      return;
+    }
     const arr = (data ?? []).reverse() as Message[];
     if (arr.length < pageSize) setHasMore(false);
     setMsgs(prev => [...arr, ...prev]);
+    setLoadingOlder(false);
   };
 
   // Listen for profiles
@@ -659,10 +667,10 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
             <div className="mb-4 flex justify-center">
               <button
                 onClick={loadOlder}
-                disabled={loading}
+                disabled={loadingOlder}
                 className="rounded-full bg-neutral-100 px-4 py-1.5 text-xs font-semibold text-neutral-600 hover:bg-neutral-200 disabled:opacity-50 transition-colors"
               >
-                {loading ? "Loading..." : "Load older messages"}
+                {loadingOlder ? "Loading..." : "Load older messages"}
               </button>
             </div>
           )}

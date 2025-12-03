@@ -53,7 +53,7 @@ export default function NotificationsPage() {
           .from("group_members" as any)
           .select("group_id")
           .eq("user_id", userId)
-          .eq("status", "active");
+          .eq("status", "accepted");
 
         const gIds = myGroups?.map((g: any) => g.group_id) || [];
 
@@ -190,7 +190,18 @@ export default function NotificationsPage() {
 
   async function handleJoinGroup(gid: string) {
     if (!user) return;
-    await supabase.from("group_members" as any).update({ status: "active" }).eq("group_id", gid).eq("user_id", user!.id);
+
+    const { error } = await supabase
+      .from("group_members" as any)
+      .update({ status: "accepted" })
+      .eq("group_id", gid)
+      .eq("user_id", user.id);
+
+    if (error) {
+      console.error("Failed to join group from notifications", error);
+      return;
+    }
+
     setInvites(prev => prev.filter(i => i.group_id !== gid));
     navigate(`/group/${gid}`);
   }
