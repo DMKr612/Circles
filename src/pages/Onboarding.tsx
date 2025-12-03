@@ -135,7 +135,8 @@ export default function Onboarding() {
   // segmented progress (0..100)
   const progressPct = ((index + 1) / SLIDES.length) * 100;
 
-  const redirectTo = `${window.location.origin}/auth/callback`;
+  const base = (import.meta.env.BASE_URL || "/").replace(/\/+$/, "");
+  const redirectTo = `${window.location.origin}${base}/auth/callback`;
 
   async function loginFacebook() {
     try {

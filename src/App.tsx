@@ -38,6 +38,7 @@ const JoinByCode = lazy(() => import("./pages/JoinByCode"));
 const NotificationsPage = lazy(() => import("./pages/Notifications"));
 const Chats = lazy(() => import("./pages/Chats"));
 const Legal = lazy(() => import("./pages/Legal"));
+const AuthCallback = lazy(() => import("./pages/AuthCallback"));
 
 // ---- Route prefetch helpers (Step 1) ----
 const routePrefetchers: Record<string, () => void> = {
@@ -260,6 +261,7 @@ export default function App() {
                 <Route path="/onboarding" element={<Onboarding />} />
                 <Route path="/legal" element={<Legal />} />
                 <Route path="/invite/:code" element={<JoinByCode />} />
+                <Route path="/auth/callback" element={<AuthCallback />} />
 
                 <Route element={<RequireAuth><Layout /></RequireAuth>}>
                   <Route path="/browse" element={<BrowsePage />} />

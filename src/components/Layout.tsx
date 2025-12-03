@@ -8,9 +8,12 @@ export default function Layout() {
   // Helper for styling:
   // - 'transition-transform duration-150': Smooth movement
   // - 'active:scale-90': The click animation (shrinks icon when pressed)
+  const isActive = (path: string) =>
+    active === path || active.startsWith(`${path}/`);
+
   const getLinkClass = (path: string) => 
     `flex flex-col items-center p-2 transition-transform duration-150 ease-in-out active:scale-90 ${
-      active === path ? 'text-black scale-105 font-semibold' : 'text-gray-400 hover:text-gray-600'
+      isActive(path) ? 'text-black scale-105 font-semibold' : 'text-gray-400 hover:text-gray-600'
     }`;
 
   return (
@@ -21,7 +24,7 @@ export default function Layout() {
       </div>
 
       {/* Bottom Navigation Bar */}
-      <nav className="fixed bottom-0 left-0 right-0 z-[100] border-t border-gray-200 bg-white/95 backdrop-blur-lg safe-area-pb">
+      <nav className="fixed bottom-0 left-0 right-0 z-[100] border-t border-gray-200 bg-white/95 backdrop-blur-lg pb-[env(safe-area-inset-bottom)]">
         <div className="mx-auto flex h-16 max-w-md items-center justify-around px-2">
           
           {/* 1. Chats (Left) */}
@@ -37,8 +40,8 @@ export default function Layout() {
           </Link>
 
           {/* 3. Browse (Center - Featured) */}
-          <Link to="/" className={getLinkClass('/')}>
-            <div className={`rounded-full p-1 -mt-1 transition-colors ${active === '/' ? 'bg-gray-100' : ''}`}>
+          <Link to="/browse" className={getLinkClass('/browse')}>
+            <div className={`rounded-full p-1 -mt-1 transition-colors ${isActive('/browse') ? 'bg-gray-100' : ''}`}>
                 <Compass className="h-7 w-7" /> 
             </div>
             <span className="text-[10px] font-medium">Browse</span>
