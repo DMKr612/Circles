@@ -106,10 +106,10 @@ export default function GroupDetail() {
 
       if (q.data?.id) {
         const { count } = await supabase
-          .from('group_members')
-          .select('*', { count: 'exact', head: true })
-          .eq('group_id', q.data.id)
-          .eq('status', 'accepted');
+  .from('group_members')
+  .select('*', { count: 'exact', head: true })
+  .eq('group_id', q.data.id)
+  .eq('status', 'active');
         if (!ignore) setMemberCount(count ?? 0);
       }
       setLoading(false);
@@ -125,7 +125,7 @@ export default function GroupDetail() {
         .from('group_members')
         .select('user_id, role, created_at, status, group_id, profiles(name, avatar_url)')
         .eq('group_id', group.id)
-        .eq('status', 'accepted')
+        .eq('status', 'active')
         .order('created_at', { ascending: true });
 
       const arr: MemberDisplay[] = (data ?? []).map((r: any) => ({
@@ -134,7 +134,7 @@ export default function GroupDetail() {
   role: r.user_id === group.host_id ? 'host' : r.role,
   created_at: r.created_at,
   group_id: group.id,
-  status: r.status ?? 'accepted',
+  status: r.status ?? 'active',
   name: r.profiles?.name ?? "User",
   avatar_url: r.profiles?.avatar_url ?? null,
 }));

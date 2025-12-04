@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Message } from "@/types";
 import { useAuth } from "@/App";
@@ -58,8 +58,6 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [loadingOlder, setLoadingOlder] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
 
   // presence/typing minimal
   const [onlineCount, setOnlineCount] = useState(0);
@@ -71,7 +69,6 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
-  const earliestTs = useMemo(() => (msgs.length ? msgs[0].created_at : null), [msgs]);
 
   // Auth hook for user info
   const { user: authUser } = useAuth();
@@ -141,14 +138,12 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
         .from("group_messages")
         .select("id,group_id,user_id:sender_id,content,created_at,parent_id,attachments")
         .eq("group_id", groupId)
-        .order("created_at", { ascending: false })
-        .limit(pageSize);
+        .order("created_at", { ascending: true });
       if (aborted) return;
       if (error) { console.error(error); setLoading(false); return; }
 
-      const arr = (data ?? []).reverse() as Message[];
+      const arr = (data ?? []) as Message[];
       setMsgs(arr);
-      setHasMore((data ?? []).length === pageSize);
       setLoading(false);
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }), 0);
 
@@ -199,11 +194,10 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
     return () => { cancelled = false; supabase.removeChannel(ch); };
   }, [groupId]);
 
-  // Auto-scroll: only scroll to bottom when not loading older history
+  // Auto-scroll to bottom when messages change
   useEffect(() => {
-    if (loadingOlder) return;
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [msgs.length, loadingOlder]);
+  }, [msgs.length]);
 
   // realtime
   useEffect(() => {
@@ -318,27 +312,6 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
     return () => { supabase.removeChannel(presence); };
   }, [groupId, me, myProfile?.name]);
 
-  // pagination
-  const loadOlder = async () => {
-    if (!earliestTs || !hasMore || loadingOlder) return;
-    setLoadingOlder(true);
-    const { data, error } = await supabase
-      .from("group_messages")
-     .select("id,group_id,user_id:sender_id,content,created_at,parent_id,attachments")
-      .eq("group_id", groupId)
-      .lt("created_at", earliestTs as string)
-      .order("created_at", { ascending: false })
-      .limit(pageSize);
-    if (error) {
-      console.error(error);
-      setLoadingOlder(false);
-      return;
-    }
-    const arr = (data ?? []).reverse() as Message[];
-    if (arr.length < pageSize) setHasMore(false);
-    setMsgs(prev => [...arr, ...prev]);
-    setLoadingOlder(false);
-  };
 
   // Listen for profiles
   useEffect(() => {
@@ -461,9 +434,11 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
     }
 
     const { error } = await supabase.rpc('send_group_message', {
-      p_group_id: groupId,
-      p_content: text,
-    });
+  p_group_id: groupId,
+  p_content: text,
+  p_parent_id: parentId,
+  p_attachments: attachments,
+});
     setSending(false);
     if (error) {
       setMsgs(prev => prev.filter(m => m.id !== phantomId));
@@ -663,17 +638,6 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
           onDragOver={(e)=>e.preventDefault()}
           onClick={()=>setMenuFor(null)}
         >
-          {hasMore && (
-            <div className="mb-4 flex justify-center">
-              <button
-                onClick={loadOlder}
-                disabled={loadingOlder}
-                className="rounded-full bg-neutral-100 px-4 py-1.5 text-xs font-semibold text-neutral-600 hover:bg-neutral-200 disabled:opacity-50 transition-colors"
-              >
-                {loadingOlder ? "Loading..." : "Load older messages"}
-              </button>
-            </div>
-          )}
 
           {loading && msgs.length === 0 ? (
             <div className="flex h-full items-center justify-center">
