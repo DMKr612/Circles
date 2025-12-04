@@ -189,7 +189,12 @@ export default function GroupDetail() {
     setMsg(null);
     const { data: auth } = await supabase.auth.getUser();
     if (!auth.user) { setMsg("Please sign in."); return; }
-    await supabase.from("group_members").insert({ group_id: id, user_id: auth.user.id });
+    await supabase
+      .from("group_members")
+      .upsert(
+        { group_id: id, user_id: auth.user.id, role: "member", status: "active" },
+        { onConflict: "group_id,user_id" }
+      );
     setIsMember(true);
     setMemberCount(prev => prev + 1);
   }

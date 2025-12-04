@@ -63,13 +63,13 @@ export default function Chats() {
         .from("group_members")
         .select("group_id, groups(id, title, category)")
         .eq("user_id", user.id)
-        .eq("status", "accepted");
+        .in("status", ["active", "accepted"]);
 
       // Fetch Friends
       const { data: friends } = await supabase
         .from("friendships")
         .select("user_id_a, user_id_b")
-        .or(`(user_id_a.eq.${user.id},user_id_b.eq.${user.id})`)
+        .or(`user_id_a.eq.${user.id},user_id_b.eq.${user.id}`)
         .eq("status", "accepted");
 
       const items: ChatItem[] = [];

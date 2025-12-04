@@ -365,13 +365,11 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
       for (const e of entries) {
         if (e.isIntersecting) {
           const id = (e.target as HTMLElement).dataset.mid;
-          if (!id) continue;
+          // Skip client-only phantom messages that aren't persisted
+          if (!id || id.startsWith("phantom-")) continue;
           await supabase
             .from("group_message_reads")
-            .upsert(
-              { message_id: id, user_id: me },
-              { onConflict: "message_id,user_id", ignoreDuplicates: true }
-            );
+            .upsert({ message_id: id, user_id: me });
         }
       }
     }, { root: el, threshold: 0.6 });
@@ -454,7 +452,10 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
       try {
         await supabase
           .from('group_members')
-          .insert({ group_id: groupId, user_id: me, role: 'member' });
+          .upsert(
+            { group_id: groupId, user_id: me, role: 'member', status: 'active' },
+            { onConflict: 'group_id,user_id' }
+          );
       } catch (e: any) {}
     })();
   }, [groupId, me]);
