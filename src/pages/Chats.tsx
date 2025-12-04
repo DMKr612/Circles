@@ -44,6 +44,7 @@ export default function Chats() {
   const [dmInput, setDmInput] = useState("");
   const [dmLoading, setDmLoading] = useState(false);
   const dmEndRef = useRef<HTMLDivElement>(null);
+  const dmInputRef = useRef<HTMLInputElement>(null);
 
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -196,6 +197,7 @@ export default function Chats() {
     if (!me || !selected || selected.type !== 'dm') return;
 
     let sub: any = null;
+    let poll: any = null;
     
     async function loadDMs() {
       setDmLoading(true);
@@ -204,7 +206,7 @@ export default function Chats() {
       const { data } = await supabase
         .from("direct_messages")
         .select("id, sender, receiver, content, created_at")
-        .or(`(sender.eq.${me},receiver.eq.${otherId}),(sender.eq.${otherId},receiver.eq.${me})`)
+        .or(`and(sender.eq.${me},receiver.eq.${otherId}),and(sender.eq.${otherId},receiver.eq.${me})`)
         .order("created_at", { ascending: true })
         .limit(100);
       
@@ -215,7 +217,7 @@ export default function Chats() {
       sub = supabase.channel(`dm:${otherId}`)
         .on(
           'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'direct_messages' },
+          { event: 'INSERT', schema: 'public', table: 'direct_messages', filter: `or(and(sender.eq.${me},receiver.eq.${otherId}),and(sender.eq.${otherId},receiver.eq.${me}))` },
           (payload) => {
             const newMsg = payload.new as DMMsg;
             const isMatch = 
@@ -229,20 +231,40 @@ export default function Chats() {
           }
         )
         .subscribe();
+
+      // Safety net polling in case realtime misses events
+      poll = setInterval(async () => {
+        const { data: fresh } = await supabase
+          .from("direct_messages")
+          .select("id, sender, receiver, content, created_at")
+          .or(`and(sender.eq.${me},receiver.eq.${otherId}),and(sender.eq.${otherId},receiver.eq.${me})`)
+          .order("created_at", { ascending: true })
+          .limit(100);
+        if (fresh) setDmMessages(fresh);
+      }, 5000);
     }
 
     loadDMs();
 
     return () => {
       if (sub) supabase.removeChannel(sub);
+      if (poll) clearInterval(poll);
     };
   }, [selected, me]);
+
+  // Keep DM input focused when switching threads
+  useEffect(() => {
+    if (selected?.type === 'dm') {
+      dmInputRef.current?.focus();
+    }
+  }, [selected]);
 
   // 3. Send DM
   const sendDM = async () => {
     if (!dmInput.trim() || !me || !selected || selected.type !== 'dm') return;
     const text = dmInput.trim();
     setDmInput("");
+    dmInputRef.current?.focus();
     await supabase.from("direct_messages").insert({
       sender: me,
       receiver: selected.id,
@@ -524,9 +546,11 @@ export default function Chats() {
               <div className="p-4 bg-white border-t border-neutral-200/80 backdrop-blur-md">
                 <div className="flex items-center gap-2 max-w-4xl mx-auto bg-neutral-50 border border-neutral-200 rounded-full px-2 py-2 focus-within:ring-2 focus-within:ring-emerald-500/20 focus-within:border-emerald-500 transition-all shadow-inner">
                   <input
+                    ref={dmInputRef}
                     value={dmInput}
                     onChange={(e) => setDmInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && sendDM()}
+                    autoFocus
                     placeholder="Type a message..."
                     className="flex-1 bg-transparent border-0 px-4 py-1 text-sm focus:ring-0 text-neutral-900 placeholder-neutral-400 outline-none"
                   />

@@ -53,6 +53,7 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
 
   const [input, setInput] = useState("");
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [memberReady, setMemberReady] = useState(false);
 
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -384,7 +385,7 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
     const text = input.trim();
     const parentId = replyTo?.id ?? null;
     const uid = me;
-    if (!uid) return;
+    if (!uid || !memberReady) return;
     if ((!text && files.length === 0) || sending || uploading) return;
 
     setSending(true);
@@ -456,7 +457,11 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
             { group_id: groupId, user_id: me, role: 'member', status: 'active' },
             { onConflict: 'group_id,user_id' }
           );
-      } catch (e: any) {}
+        setMemberReady(true);
+      } catch (e: any) {
+        console.warn("membership ensure failed", e);
+        setMemberReady(false);
+      }
     })();
   }, [groupId, me]);
 
@@ -837,6 +842,7 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
               onPaste={onPaste}
+              autoFocus
               placeholder="Type a message..."
               rows={1}
               className="w-full resize-none rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 focus:border-neutral-300 focus:bg-white focus:outline-none focus:ring-0 max-h-32 transition-all"
@@ -846,7 +852,7 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
 
           <button 
             onClick={send} 
-            disabled={sending || uploading || (input.trim().length === 0 && files.length === 0)}
+            disabled={sending || uploading || !memberReady || (input.trim().length === 0 && files.length === 0)}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-white shadow-sm hover:bg-black disabled:bg-neutral-200 disabled:text-neutral-400 transition-all active:scale-95"
           >
             {uploading || sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4 ml-0.5" />}

@@ -14,6 +14,14 @@ export function useGroupPresence(groupId: string | undefined, myUserId: string |
         const coordinates = await Geolocation.getCurrentPosition({ enableHighAccuracy: true });
         const { latitude, longitude } = coordinates.coords;
 
+        // Ensure membership exists so RLS on group_live_locations passes
+        await supabase
+          .from('group_members')
+          .upsert(
+            { group_id: groupId, user_id: myUserId, role: 'member', status: 'active' },
+            { onConflict: 'group_id,user_id' }
+          );
+
         await supabase.from('group_live_locations').upsert({
           user_id: myUserId,
           group_id: groupId,

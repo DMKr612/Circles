@@ -15,6 +15,7 @@ export default function NotificationsPage() {
   const [invites, setInvites] = useState<any[]>([]);
   const [polls, setPolls] = useState<any[]>([]);
   const [messages, setMessages] = useState<any[]>([]);
+  const [votes, setVotes] = useState<any[]>([]);
 
   // UI State
   const [showOlder, setShowOlder] = useState(false);
@@ -26,7 +27,6 @@ export default function NotificationsPage() {
 
     async function loadData() {
       setLoading(true);
-      const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
 
       try {
         const { data: rpcData } = await supabase.rpc("get_my_friend_requests");
@@ -47,7 +47,7 @@ export default function NotificationsPage() {
           .select("group_id, created_at, groups(title)")
           .eq("user_id", userId)
           .eq("status", "invited")
-          .gt("created_at", twoWeeksAgo);
+          .order("created_at", { ascending: false });
 
         const { data: myGroups } = await supabase
           .from("group_members" as any)
@@ -59,6 +59,7 @@ export default function NotificationsPage() {
 
         let fetchedPolls: any[] = [];
         let fetchedMsgs: any[] = [];
+        let fetchedVotes: any[] = [];
 
         if (gIds.length > 0) {
           const { data: p } = await supabase
@@ -66,7 +67,6 @@ export default function NotificationsPage() {
             .select("id, title, group_id, created_at, groups(title)")
             .in("group_id", gIds)
             .eq("status", "open")
-            .gt("created_at", twoWeeksAgo)
             .order("created_at", { ascending: false });
           fetchedPolls = p || [];
 
@@ -74,17 +74,25 @@ export default function NotificationsPage() {
             .from("group_messages" as any)
             .select("group_id, created_at, groups(title)")
             .in("group_id", gIds)
-            .neq("user_id", userId)
-            .gt("created_at", twoWeeksAgo)
+            .neq("sender_id", userId)
             .order("created_at", { ascending: false })
             .limit(50);
           fetchedMsgs = m || [];
+
+          const { data: v } = await supabase
+            .from("group_votes" as any)
+            .select("poll_id, option_id, created_at, group_polls(id, title, group_id, groups(title)), group_poll_options(id, label)")
+            .eq("user_id", userId)
+            .order("created_at", { ascending: false })
+            .limit(200);
+          fetchedVotes = v || [];
         }
 
         setFriendReqs(friendRequests || []);
         setInvites(inv || []);
         setPolls(fetchedPolls);
         setMessages(fetchedMsgs);
+        setVotes(fetchedVotes);
       } catch (e) {
         console.error("Error loading notifications", e);
       } finally {
@@ -99,8 +107,8 @@ export default function NotificationsPage() {
 
   const processedEvents = useMemo(() => {
     const events: any[] = [];
-    const now = Date.now();
-    const oneDay = 24 * 60 * 60 * 1000;
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
 
     // A. Friend Requests
     friendReqs.forEach(r => {
@@ -171,15 +179,25 @@ export default function NotificationsPage() {
       });
     });
 
+    // E. Votes (always show own votes regardless of poll create time)
+    votes.forEach(v => {
+      events.push({
+        id: `vote-${v.poll_id}-${v.option_id}-${v.created_at}`,
+        type: 'vote',
+        date: new Date(v.created_at),
+        data: v
+      });
+    });
+
     // Sort all by date descending
     events.sort((a, b) => b.date.getTime() - a.date.getTime());
 
-    // Split into Recent (< 24h) and Older (> 24h)
-    const recent = events.filter(e => (now - e.date.getTime()) < oneDay);
-    const older = events.filter(e => (now - e.date.getTime()) >= oneDay);
+    // Split into same-day vs older (based on local midnight)
+    const recent = events.filter(e => e.date.getTime() >= startOfToday.getTime());
+    const older = events.filter(e => e.date.getTime() < startOfToday.getTime());
 
     return { recent, older };
-  }, [friendReqs, invites, polls, messages]);
+  }, [friendReqs, invites, polls, messages, votes]);
 
   // --- Handlers ---
 
@@ -218,11 +236,13 @@ export default function NotificationsPage() {
           e.type === 'friend_req' ? 'bg-purple-100 text-purple-600' :
           e.type === 'invite' ? 'bg-amber-100 text-amber-600' :
           e.type === 'poll' ? 'bg-blue-100 text-blue-600' :
+          e.type === 'vote' ? 'bg-emerald-100 text-emerald-600' :
           'bg-emerald-100 text-emerald-600'
         }`}>
           {e.type === 'friend_req' && <UserPlus className="h-5 w-5" />}
           {e.type === 'invite' && <Mail className="h-5 w-5" />}
           {e.type === 'poll' && <CheckSquare className="h-5 w-5" />}
+          {e.type === 'vote' && <CheckSquare className="h-5 w-5" />}
           {e.type === 'message_summary' && <MessageCircle className="h-5 w-5" />}
         </div>
 
@@ -257,6 +277,22 @@ export default function NotificationsPage() {
               <div className="text-sm font-bold text-neutral-900">{e.data.title}</div>
               <div className="text-xs text-neutral-500 flex items-center gap-1">
                 Vote in <span className="font-medium text-neutral-700">{e.data.groups?.title}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Vote */}
+          {e.type === 'vote' && (
+            <div onClick={() => navigate(`/group/${e.data.group_polls?.group_id || e.data.group_polls?.group_id}`)} className="cursor-pointer">
+              <div className="text-sm font-bold text-neutral-900">You voted</div>
+              <div className="text-xs text-neutral-500">
+                {e.data.group_polls?.title ? `Poll: ${e.data.group_polls.title}` : 'Poll'}
+              </div>
+              <div className="text-xs text-neutral-500">
+                {e.data.group_poll_options?.label ? `Choice: ${e.data.group_poll_options.label}` : ''}
+              </div>
+              <div className="text-xs text-neutral-500">
+                {e.data.group_polls?.groups?.title ? `Group: ${e.data.group_polls.groups.title}` : ''}
               </div>
             </div>
           )}
@@ -297,7 +333,7 @@ export default function NotificationsPage() {
             <span className="text-2xl">💤</span>
           </div>
           <h3 className="text-neutral-900 font-bold">All caught up</h3>
-          <p className="text-neutral-500 text-sm">No new notifications in the last 2 weeks.</p>
+          <p className="text-neutral-500 text-sm">No activity yet.</p>
         </div>
       )}
 

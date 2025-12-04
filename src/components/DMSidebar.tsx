@@ -51,6 +51,7 @@ const DMSidebar = forwardRef<HTMLDivElement, DMSidebarProps>(
   const [dmMsgs, setDmMsgs] = useState<DMMessage[]>([]);
   const [dmInput, setDmInput] = useState("");
   const dmEndRef = useRef<HTMLDivElement | null>(null);
+  const dmInputRef = useRef<HTMLInputElement | null>(null);
   
   const [threadQuery, setThreadQuery] = useState("");
   const threadQueryDeferred = useDeferredValue(threadQuery);
@@ -90,11 +91,12 @@ const DMSidebar = forwardRef<HTMLDivElement, DMSidebarProps>(
     const { data: msgs } = await supabase
       .from("direct_messages")
       .select("id,sender,receiver,content,created_at")
-      .or(`(sender.eq.${uid},receiver.eq.${otherId}),(sender.eq.${otherId},receiver.eq.${uid})`)
+      .or(`and(sender.eq.${uid},receiver.eq.${otherId}),and(sender.eq.${otherId},receiver.eq.${uid})`)
       .order("created_at", { ascending: true })
       .limit(200);
     setDmMsgs(msgs ?? []);
     setDmLoading(false);
+    dmInputRef.current?.focus();
   }, [uid, onMarkRead]);
 
   async function sendDm() {
@@ -110,6 +112,7 @@ const DMSidebar = forwardRef<HTMLDivElement, DMSidebarProps>(
     if (data) {
       setDmMsgs((prev) => [...prev, data!]);
     }
+    dmInputRef.current?.focus();
     // Also update the thread list in the parent
     const updatedThread: Thread = {
       other_id: dmTargetId,
@@ -275,9 +278,11 @@ const DMSidebar = forwardRef<HTMLDivElement, DMSidebarProps>(
           {/* Composer */}
           <div className="mt-2 flex items-center gap-2">
             <input
+              ref={dmInputRef}
               value={dmInput}
               onChange={(e) => setDmInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") sendDm(); }}
+              autoFocus
               placeholder="Type a message…"
               className="w-full rounded-md border border-black/10 px-3 py-2 text-sm"
             />

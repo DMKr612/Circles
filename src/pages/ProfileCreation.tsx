@@ -6,6 +6,9 @@ export default function ProfileCreation() {
   const { user } = useAuth();
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
+  const [city, setCity] = useState("");
+  const [timezone, setTimezone] = useState("");
+  const [interests, setInterests] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,6 +27,9 @@ export default function ProfileCreation() {
   .update({
     name: fullName,   // <- use 'name', matches DB schema
     username,
+    city: city || null,
+    timezone: timezone || null,
+    interests: interests || null,
     onboarded: true,
   } as any)
   .eq("user_id", user!.id);
@@ -67,6 +73,39 @@ export default function ProfileCreation() {
               onChange={(e) => setUsername(e.target.value)}
               className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-black focus:ring-1 focus:ring-black"
               required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">City / Location</label>
+            <input
+              type="text"
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+              className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-black focus:ring-1 focus:ring-black"
+              placeholder="e.g., Toronto, Berlin"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Timezone</label>
+            <input
+              type="text"
+              value={timezone}
+              onChange={(e) => setTimezone(e.target.value)}
+              className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-black focus:ring-1 focus:ring-black"
+              placeholder="e.g., UTC-5, CET, PST"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Interests</label>
+            <textarea
+              value={interests}
+              onChange={(e) => setInterests(e.target.value)}
+              rows={3}
+              className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-black focus:ring-1 focus:ring-black resize-none"
+              placeholder="Games, study topics, outdoor hobbies…"
             />
           </div>
 
