@@ -68,19 +68,24 @@ function AuthProvider({ children }: PropsWithChildren) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let on = true;
-    (async () => {
-      const { data } = await supabase.auth.getUser();
-      if (!on) return;
-      setUser(data.user ?? null);
+    let active = true;
+
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!active) return;
+      if (error) console.warn("[auth] getSession error", error.message);
+      setUser(data.session?.user ?? null);
       setLoading(false);
-    })();
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => {
-      setUser(s?.user ?? null);
     });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!active) return;
+      setUser(session?.user ?? null);
+      setLoading(false);
+    });
+
     return () => {
+      active = false;
       subscription.unsubscribe();
-      on = false;
     };
   }, []);
 

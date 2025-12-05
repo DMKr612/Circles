@@ -64,6 +64,7 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
   const [onlineCount, setOnlineCount] = useState(0);
   const [someoneTyping, setSomeoneTyping] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [onlineIds, setOnlineIds] = useState<Set<string>>(new Set());
 
   const [members, setMembers] = useState<Member[]>([]);
   const [showMembers, setShowMembers] = useState(false);
@@ -78,6 +79,40 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
 
   // --- LOCATION PRESENCE HOOK ---
   const { isTogether } = useGroupPresence(groupId, me ?? undefined);
+
+  // --- ONLINE PRESENCE (Realtime) ---
+  useEffect(() => {
+    if (!groupId) return;
+    const key = me || "anon";
+    const channel = supabase.channel(`presence:g:${groupId}`, {
+      config: { presence: { key } },
+    });
+
+    channel.on("presence", { event: "sync" }, () => {
+      const state = channel.presenceState() as Record<string, Array<{ user_id?: string; key?: string }>>;
+      const ids = new Set<string>();
+      Object.values(state).forEach((arr) => {
+        arr?.forEach((entry) => {
+          const uid = entry.user_id || entry.key;
+          if (uid) ids.add(String(uid));
+        });
+      });
+      setOnlineIds(ids);
+      setOnlineCount(Math.max(0, ids.size));
+    });
+
+    channel.subscribe(async (status) => {
+      if (status === "SUBSCRIBED") {
+        await channel.track({ user_id: key, at: new Date().toISOString() });
+      }
+    });
+
+    return () => {
+      setOnlineIds(new Set());
+      setOnlineCount(0);
+      supabase.removeChannel(channel);
+    };
+  }, [groupId, me]);
 
   // load messages + profiles + reactions + reads
   useEffect(() => {
@@ -609,6 +644,7 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
             <ul className="max-h-60 overflow-y-auto space-y-1 pr-1">
               {members.map(m => {
                 const nearby = isTogether(m.user_id);
+                const isOnline = onlineIds.has(m.user_id);
                 return (
                   <li key={m.user_id} className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-neutral-50 transition-colors">
                     <div className="relative">
@@ -619,13 +655,20 @@ export default function ChatPanel({ groupId, pageSize = 30, user, onClose, full,
                           {(m.name || "").slice(0,2).toUpperCase() || "?"}
                         </div>
                       )}
+                      {isOnline && (
+                        <span className="absolute -top-0.5 -right-0.5 h-3 w-3 rounded-full bg-emerald-500 border-2 border-white" />
+                      )}
                       {nearby && (
-                        <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-emerald-500 border-2 border-white" />
+                        <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-emerald-500 border-2 border-white opacity-80" />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="truncate text-sm font-semibold text-neutral-900">{(m.name && m.name.trim()) || "Player"}</div>
-                      {nearby && <div className="text-[10px] font-medium text-emerald-600 flex items-center gap-1">Here with you</div>}
+                      {nearby ? (
+                        <div className="text-[10px] font-medium text-emerald-600 flex items-center gap-1">Here with you</div>
+                      ) : (
+                        isOnline && <div className="text-[10px] font-medium text-emerald-600">Online</div>
+                      )}
                     </div>
                   </li>
                 );
