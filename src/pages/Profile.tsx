@@ -168,7 +168,7 @@ export default function Profile() {
         .from('group_members')
         .select('group_id', { count: 'exact', head: true })
         .eq('user_id', uid)
-        .eq('status', 'accepted');
+        .in('status', ['active', 'accepted']);
       if (error) {
         console.warn('Failed to load joined groups count', error);
         return;

@@ -44,12 +44,12 @@ export function useProfile(userId: string | null) {
           .select("group_id", { count: "exact", head: true })
           .eq("user_id", userId)
           .in("role", ["owner", "host"])
-          .eq("status", "active"),
+          .in("status", ["active", "accepted"]),
         supabase
           .from("group_members")
           .select("group_id", { count: "exact", head: true })
           .eq("user_id", userId)
-          .eq("status", "active"),
+          .in("status", ["active", "accepted"]),
       ]);
 
       return {
