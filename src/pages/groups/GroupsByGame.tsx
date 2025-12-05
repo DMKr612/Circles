@@ -16,6 +16,7 @@ type Group = {
   created_at: string | null;
   code?: string | null;
   capacity?: number | null;
+  requires_verification_level?: number | null;
 };
 
 function fmtDate(d?: string | null) {

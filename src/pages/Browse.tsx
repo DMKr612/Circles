@@ -13,7 +13,7 @@ type MomentCard = {
   min_view_level: number | null;
   created_at: string;
   group_id: string;
-  groups?: { title: string | null; city: string | null };
+  groups?: { title?: string | null; city?: string | null } | null;
 };
 
 /**
