@@ -53,7 +53,7 @@ export default function NotificationsPage() {
           .from("group_members" as any)
           .select("group_id")
           .eq("user_id", userId)
-          .eq("status", "accepted");
+          .in("status", ["active", "accepted"]);
 
         const gIds = myGroups?.map((g: any) => g.group_id) || [];
 
