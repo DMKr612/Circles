@@ -5,7 +5,8 @@ import compression from 'vite-plugin-compression';
 import { fileURLToPath, URL } from 'node:url';
 
 export default defineConfig({
-  base: '/circles/',
+  // Use root-relative paths so assets resolve correctly on Vercel
+  base: '/',
   plugins: [
     react(),
     compression({ algorithm: 'brotliCompress' }),
