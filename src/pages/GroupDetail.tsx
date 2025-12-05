@@ -1,7 +1,7 @@
-import { useEffect, useState, useMemo, lazy, Suspense } from "react";
+import { useEffect, useState, useMemo, lazy, Suspense, useRef } from "react";
 import { useParams, useNavigate, Link, useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabase";
-import type { Group, Poll, PollOption, GroupMember } from "../types";
+import type { Group, Poll, PollOption, GroupMember, GroupEvent, GroupMoment } from "../types";
 import { 
   MapPin, Users, Calendar, Clock, Share2, MessageCircle, 
   LogOut, Trash2, Edit2, Check, X, Plus, ChevronLeft, AlertCircle 
@@ -25,10 +25,6 @@ export default function GroupDetail() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
   const [me, setMe] = useState<string | null>(null);
-  
-  const { isTogether } = useGroupPresence(id, me ?? undefined);
-  
-  const [copied, setCopied] = useState(false);
 
   // Host check
   const isHost = !!(me && group && (me === group.host_id || (group?.creator_id ?? null) === me));
@@ -47,6 +43,7 @@ export default function GroupDetail() {
   const [editBusy, setEditBusy] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   // Voting State
   const [poll, setPoll] = useState<Poll | null>(null);
@@ -58,6 +55,21 @@ export default function GroupDetail() {
   
   const [members, setMembers] = useState<MemberDisplay[]>([]);
   const [isMember, setIsMember] = useState(false);
+  const MAX_GROUPS = 7;
+  const [joinedCount, setJoinedCount] = useState<number>(0);
+  const [myVerificationLevel, setMyVerificationLevel] = useState<number>(1);
+  const [myMembership, setMyMembership] = useState<GroupMember | null>(null);
+  const [event, setEvent] = useState<GroupEvent | null>(null);
+  const [moments, setMoments] = useState<GroupMoment[]>([]);
+  const [momentsTick, setMomentsTick] = useState(0);
+  const [momentBusy, setMomentBusy] = useState(false);
+  const [momentMsg, setMomentMsg] = useState<string | null>(null);
+  const [ownershipBusy, setOwnershipBusy] = useState<string | null>(null);
+  const { isTogether } = useGroupPresence(id, isMember ? me ?? undefined : undefined);
+  const togetherNow = useMemo(() => members.some((m) => isTogether(m.user_id)), [members, isTogether]);
+  const momentInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const supportEmail = import.meta.env.VITE_SUPPORT_EMAIL || "support@circles.app";
 
   // New Poll Form
   const [newTitle, setNewTitle] = useState("Schedule");
@@ -84,6 +96,47 @@ export default function GroupDetail() {
     if (days > 0) return `${days}d ${hours}h left`;
     if (hours > 0) return `${hours}h ${minutes}m left`;
     return `${minutes}m left`;
+  }
+
+  function formatDateTime(iso: string | null) {
+    if (!iso) return "TBD";
+    try {
+      const d = new Date(iso);
+      return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    } catch { return "TBD"; }
+  }
+
+  function toICSDate(d: Date) {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
+  }
+
+  function downloadCalendar(ev: GroupEvent) {
+    const start = ev.starts_at ? new Date(ev.starts_at) : new Date();
+    const end = new Date(start.getTime() + 60 * 60 * 1000);
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//circles//event//EN",
+      "BEGIN:VEVENT",
+      `UID:${ev.id}`,
+      `DTSTAMP:${toICSDate(new Date())}`,
+      `DTSTART:${toICSDate(start)}`,
+      `DTEND:${toICSDate(end)}`,
+      `SUMMARY:${ev.title || "Circle Event"}`,
+      ev.place ? `LOCATION:${ev.place}` : "",
+      `DESCRIPTION:Created from poll ${ev.poll_id || ""}`,
+      "END:VEVENT",
+      "END:VCALENDAR"
+    ].filter(Boolean).join("\r\n");
+
+    const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${ev.title || "event"}.ics`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   // --- Effects ---
@@ -116,6 +169,36 @@ export default function GroupDetail() {
     })();
     return () => { ignore = true; };
   }, [id]);
+
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      if (!group?.id) return;
+      const { data: auth } = await supabase.auth.getUser();
+      const uid = auth.user?.id;
+      if (!uid || off) return;
+
+      const { data: prof } = await supabase.from('profiles').select('verification_level').eq('user_id', uid).maybeSingle();
+      if (!off) setMyVerificationLevel(prof?.verification_level ?? 1);
+
+      const { data: gm, count } = await supabase
+        .from('group_members')
+        .select('group_id, user_id, role, status, last_joined_at, created_at', { count: 'exact' })
+        .eq('user_id', uid)
+        .eq('status', 'active');
+      if (off) return;
+      setJoinedCount(count ?? (gm?.length ?? 0));
+      const current = (gm ?? []).find((r: any) => r.group_id === group.id);
+      if (current) {
+        setMyMembership(current as GroupMember);
+        setIsMember(true);
+      } else {
+        setIsMember(false);
+        setMyMembership(null);
+      }
+    })();
+    return () => { off = true; };
+  }, [group?.id, group?.host_id]);
 
   useEffect(() => {
     let off = false;
@@ -183,29 +266,108 @@ export default function GroupDetail() {
     return () => { gone = true; };
   }, [group?.id]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!group?.id) return;
+      const { data } = await supabase
+        .from('group_events')
+        .select('*')
+        .eq('group_id', group.id)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (cancelled) return;
+      setEvent(((data ?? [])[0] as GroupEvent) || null);
+    })();
+    return () => { cancelled = true; };
+  }, [group?.id, poll?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!group?.id) return;
+      const { data } = await supabase
+        .from('group_moments')
+        .select('id, group_id, created_by, photo_url, caption, verified, min_view_level, created_at, verified_at')
+        .eq('group_id', group.id)
+        .order('created_at', { ascending: false })
+        .limit(12);
+      if (cancelled) return;
+      setMoments((data as GroupMoment[]) ?? []);
+    })();
+    return () => { cancelled = true; };
+  }, [group?.id, momentsTick]);
+
   // --- Actions ---
 
   async function joinGroup() {
     setMsg(null);
+    if (!group) return;
+    if (joinedCount >= MAX_GROUPS) {
+      setMsg("You can only be in 7 circles at once. Leave another to join.");
+      return;
+    }
+    const requiredLevel = Number(group.requires_verification_level ?? 1);
+    if (myVerificationLevel < requiredLevel) {
+      setMsg("This circle is for verified members only.");
+      return;
+    }
     const { data: auth } = await supabase.auth.getUser();
     if (!auth.user) { setMsg("Please sign in."); return; }
-    await supabase
+    const payload = { group_id: id, user_id: auth.user.id, role: "member", status: "active", last_joined_at: new Date().toISOString() };
+    const { error } = await supabase
       .from("group_members")
-      .upsert(
-        { group_id: id, user_id: auth.user.id, role: "member", status: "active" },
-        { onConflict: "group_id,user_id" }
-      );
+      .upsert(payload, { onConflict: "group_id,user_id" });
+    if (error) { 
+      const text = (error.message || "").toLowerCase();
+      if (text.includes("group_join_limit")) setMsg("You can only be in 7 circles at once. Leave another to join.");
+      else if (text.includes("verification")) setMsg("This circle requires a higher verification level.");
+      else setMsg(error.message || "Could not join."); 
+      return; 
+    }
     setIsMember(true);
-    setMemberCount(prev => prev + 1);
+    setMyMembership({ ...(payload as any), created_at: new Date().toISOString() });
+    setMemberCount(prev => prev + (isMember ? 0 : 1));
+    setJoinedCount((c) => Math.min(MAX_GROUPS, c + (isMember ? 0 : 1)));
   }
 
   async function leaveGroup() {
     setMsg(null);
     if (!group || !me) return;
     if (me === group.host_id) { setMsg("Host cannot leave their own group."); return; }
-    await supabase.from("group_members").delete().match({ group_id: group.id, user_id: me });
+    const joinedAt = myMembership?.last_joined_at;
+    if (joinedAt) {
+      const diff = Date.now() - new Date(joinedAt).getTime();
+      if (diff < 12 * 60 * 60 * 1000) {
+        setMsg("You must stay in a Circle for at least 12 hours before leaving.");
+        return;
+      }
+    }
+    const { error } = await supabase.from("group_members").delete().match({ group_id: group.id, user_id: me });
+    if (error) { 
+      const text = (error.message || "").toLowerCase();
+      if (text.includes("leave_cooldown")) setMsg("You must stay in a Circle for at least 12 hours before leaving.");
+      else setMsg(error.message || "Could not leave."); 
+      return; 
+    }
     setIsMember(false);
     setMemberCount(prev => Math.max(0, prev - 1));
+    setJoinedCount((c) => Math.max(0, c - 1));
+    setMyMembership(null);
+  }
+
+  async function transferHost(nextHostId: string) {
+    if (!group || !isHost) return;
+    setMsg(null);
+    setOwnershipBusy(nextHostId);
+    const { error } = await supabase.from("groups").update({ host_id: nextHostId }).eq("id", group.id);
+    if (error) { setMsg(error.message || "Could not transfer host."); setOwnershipBusy(null); return; }
+    setGroup(prev => prev ? { ...prev, host_id: nextHostId } as Group : prev);
+    setMembers(prev => prev.map((m) => ({
+      ...m,
+      role: m.user_id === nextHostId ? 'host' : (m.role === 'host' ? 'member' : m.role)
+    })));
+    setOwnershipBusy(null);
   }
 
   async function copyGroupCode() {
@@ -235,6 +397,61 @@ export default function GroupDetail() {
     } finally {
       setShareBusy(false);
     }
+  }
+
+  async function handleMomentFile(list: FileList | null) {
+    if (!list || !list[0]) return;
+    if (!group) return;
+    const file = list[0];
+    if (file.size > 4_000_000) { setMomentMsg("Image must be under 4MB."); return; }
+    const { data: auth } = await supabase.auth.getUser();
+    if (!auth.user) { setMomentMsg("Sign in to share a moment."); return; }
+    setMomentBusy(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      const { error } = await supabase.from('group_moments').insert({
+        group_id: group.id,
+        created_by: auth.user.id,
+        photo_url: dataUrl,
+        verified: togetherNow,
+        min_view_level: togetherNow ? Math.max(2, myVerificationLevel) : 1,
+        caption: togetherNow ? "Verified meetup" : null,
+        verified_at: togetherNow ? new Date().toISOString() : null
+      });
+      if (error) throw error;
+      setMomentMsg("Moment captured.");
+      setMomentsTick((t) => t + 1);
+    } catch (e: any) {
+      setMomentMsg(e.message || "Could not save moment.");
+    } finally {
+      setMomentBusy(false);
+      setTimeout(() => setMomentMsg(null), 2000);
+    }
+  }
+
+  const triggerMomentPicker = () => momentInputRef.current?.click();
+  const triggerMomentCamera = () => cameraInputRef.current?.click();
+
+  function reportMoment(m: GroupMoment) {
+    const subject = encodeURIComponent(`Moment review request ${m.id}`);
+    const reporter = me ? `Reporter: ${me}` : "Reporter: anonymous";
+    const body = encodeURIComponent(
+      [
+        `Moment ID: ${m.id}`,
+        `Group ID: ${m.group_id}`,
+        `Group title: ${group?.title || ""}`,
+        `Created by: ${m.created_by}`,
+        reporter,
+        "",
+        "Reason: "
+      ].join("\n")
+    );
+    window.location.href = `mailto:${supportEmail}?subject=${subject}&body=${body}`;
   }
 
   async function handleDelete() {
@@ -330,6 +547,19 @@ export default function GroupDetail() {
     setOptions(createdOptions);
     setCounts({});
     setVotedCount(0);
+
+    try {
+      const recipients = members.map((m) => m.user_id).filter((uid) => uid !== auth.user.id);
+      if (recipients.length) {
+        await supabase.functions.invoke('push-dispatch', {
+          body: {
+            userIds: recipients,
+            type: 'poll_created',
+            payload: { group_id: group.id, poll_id: created.id, title: newTitle }
+          }
+        });
+      }
+    } catch { /* non-blocking */ }
   }
 
   async function finalizePoll() {
@@ -338,8 +568,10 @@ export default function GroupDetail() {
     if (!window.confirm("End voting? Everyone who hasn't voted will be marked as 'Not Coming'.")) return;
     setVotingBusy("closing");
     try {
-      await supabase.rpc('resolve_poll', { p_poll_id: poll.id });
+      const { data, error } = await supabase.rpc('resolve_poll', { p_poll_id: poll.id });
+      if (error) throw error;
       setPoll(prev => prev ? { ...prev, status: 'closed' } : prev);
+      setEvent((data as GroupEvent) || null);
     } catch (e: any) {
       setMsg(e.message);
     } finally {
@@ -440,6 +672,11 @@ export default function GroupDetail() {
           {String(group.code).toUpperCase()}
         </button>
     )}
+    {(group.requires_verification_level ?? 1) > 1 && (
+        <div className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold">
+            Verified L{group.requires_verification_level}+ only
+        </div>
+    )}
     <div className="inline-flex items-center gap-1.5 border border-neutral-200 text-neutral-600 px-3 py-1 rounded-full text-xs font-medium">
         <Users className="h-3 w-3" /> {memberCount} / {group.capacity}
     </div>
@@ -449,8 +686,8 @@ export default function GroupDetail() {
                     {/* Main Actions */}
                     <div className="flex flex-wrap items-center gap-3">
                         {!isMember ? (
-                            <button onClick={joinGroup} className="h-10 px-6 rounded-full bg-emerald-600 text-white text-sm font-bold shadow-md hover:bg-emerald-700 hover:shadow-lg active:scale-95 transition-all">
-                                Join Group
+                            <button onClick={joinGroup} disabled={joinedCount >= MAX_GROUPS} className="h-10 px-6 rounded-full bg-emerald-600 text-white text-sm font-bold shadow-md hover:bg-emerald-700 hover:shadow-lg active:scale-95 transition-all disabled:opacity-60 disabled:cursor-not-allowed">
+                                {joinedCount >= MAX_GROUPS ? "Limit Reached" : "Join Group"}
                             </button>
                         ) : (
                             <>
@@ -522,6 +759,84 @@ export default function GroupDetail() {
                         </p>
                     )}
 
+                </section>
+
+                <section className="bg-white rounded-2xl p-6 shadow-sm border border-neutral-200/60 relative">
+                    <div className="flex items-center justify-between mb-3 gap-2">
+                        <h2 className="text-lg font-bold text-neutral-900 flex items-center gap-2">
+                            Moments
+                        </h2>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={triggerMomentPicker}
+                            disabled={!isMember || momentBusy}
+                            className={`text-xs font-bold px-3 py-1.5 rounded-full ${isMember ? 'bg-black text-white' : 'bg-neutral-200 text-neutral-500 cursor-not-allowed'} ${momentBusy ? 'opacity-70' : ''}`}
+                          >
+                            {momentBusy ? "Saving..." : "Add"}
+                          </button>
+                          <button
+                            onClick={triggerMomentCamera}
+                            disabled={!isMember || momentBusy}
+                            className={`text-xs font-bold px-3 py-1.5 rounded-full border ${isMember ? 'bg-white text-neutral-800 border-neutral-300' : 'bg-neutral-100 text-neutral-400 border-neutral-200 cursor-not-allowed'} ${momentBusy ? 'opacity-70' : ''}`}
+                          >
+                            {momentBusy ? "..." : "Take Photo"}
+                          </button>
+                          <input
+                            ref={momentInputRef}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            disabled={!isMember || momentBusy}
+                            onChange={(e) => { handleMomentFile(e.target.files); if (e.target) e.target.value = ""; }}
+                          />
+                          <input
+                            ref={cameraInputRef}
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            className="hidden"
+                            disabled={!isMember || momentBusy}
+                            onChange={(e) => { handleMomentFile(e.target.files); if (e.target) e.target.value = ""; }}
+                          />
+                        </div>
+                    </div>
+                    {momentMsg && (
+                        <div className="mb-3 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+                            {momentMsg}
+                        </div>
+                    )}
+                    {togetherNow && (
+                        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
+                            You're all here! Take a group selfie to verify this meetup.
+                        </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-3">
+                        {moments.map((m) => {
+                            const needsReview = !m.verified || myVerificationLevel < (m.min_view_level ?? 1);
+                            return (
+                                <div key={m.id} className="relative overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50">
+                                    <img src={m.photo_url} className="h-32 w-full object-cover" />
+                                    <div className="absolute top-2 left-2 rounded-full bg-black/70 text-white text-[10px] font-bold px-2 py-0.5">
+                                        {m.verified ? "Verified" : "Unverified"} • {m.id.slice(0, 8)}
+                                    </div>
+                                    {needsReview && (
+                                        <div className="absolute inset-0 flex items-end justify-start p-2">
+                                            <button
+                                              type="button"
+                                              onClick={() => reportMoment(m)}
+                                              className="rounded-lg bg-white/90 text-[10px] font-bold text-neutral-800 px-3 py-1.5 shadow-sm border border-neutral-200 hover:bg-white"
+                                            >
+                                                Not yet reviewed — report if inappropriate
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                    {moments.length === 0 && (
+                        <div className="text-sm text-neutral-500">No moments yet. Share your first meetup photo.</div>
+                    )}
                 </section>
 
                 {/* Details Card */}
@@ -616,6 +931,19 @@ export default function GroupDetail() {
                                     )
                                 })}
                             </div>
+
+                            {event && (
+                                <div className="mb-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2">
+                                    <div className="text-xs font-bold text-emerald-800">Confirmed Event</div>
+                                    <div className="text-sm font-semibold text-neutral-900">{event.title}</div>
+                                    <div className="text-xs text-neutral-600">{formatDateTime(event.starts_at)} {event.place ? `• ${event.place}` : ""}</div>
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                      <button onClick={() => downloadCalendar(event)} className="text-xs font-bold rounded-lg bg-black text-white px-3 py-1.5 hover:bg-neutral-800">
+                                        Add to Calendar
+                                      </button>
+                                    </div>
+                                </div>
+                            )}
 
                             {isHost && (
                                 <div className="flex flex-col gap-2 pt-3 border-t border-neutral-100">
@@ -778,6 +1106,15 @@ export default function GroupDetail() {
                          )}
                        </div>
                     </div>
+                    {isHost && m.user_id !== group.host_id && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); transferHost(m.user_id); }}
+                        className="text-[10px] font-bold text-amber-700 border border-amber-200 px-2 py-1 rounded-lg hover:bg-amber-50 disabled:opacity-50"
+                        disabled={ownershipBusy === m.user_id}
+                      >
+                        {ownershipBusy === m.user_id ? "..." : "Pass Torch"}
+                      </button>
+                    )}
                  </div>
                ))}
             </div>

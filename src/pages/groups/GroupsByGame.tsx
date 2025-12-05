@@ -46,6 +46,9 @@ export default function GroupsByGame() {
 
   const [memberOf, setMemberOf] = useState<Set<string>>(new Set());
   const [joiningId, setJoiningId] = useState<string | null>(null);
+  const [joinedCount, setJoinedCount] = useState<number>(0);
+  const [myVerificationLevel, setMyVerificationLevel] = useState<number>(1);
+  const MAX_GROUPS = 7;
 
   const [sortBy, setSortBy] = useState<'new' | 'online'>('new');
   const [onlineCounts, setOnlineCounts] = useState<Record<string, number>>({});
@@ -133,18 +136,58 @@ export default function GroupsByGame() {
     return () => { mounted = false; };
   }, [key, display]);
 
-  async function joinGroup(groupId: string) {
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (!userId) { 
+        setMemberOf(new Set());
+        setJoinedCount(0);
+        setMyVerificationLevel(1);
+        return;
+      }
+      try {
+        const { data: prof } = await supabase.from('profiles').select('verification_level').eq('user_id', userId).maybeSingle();
+        if (active) setMyVerificationLevel(prof?.verification_level ?? 1);
+      } catch {
+        if (active) setMyVerificationLevel(1);
+      }
+      const { data, count } = await supabase
+        .from('group_members')
+        .select('group_id', { count: 'exact' })
+        .eq('user_id', userId)
+        .eq('status', 'active');
+      if (!active) return;
+      const ids = new Set((data ?? []).map((r: any) => r.group_id));
+      setMemberOf(ids);
+      setJoinedCount(count ?? (data?.length ?? 0));
+    })();
+    return () => { active = false; };
+  }, [userId]);
+
+  async function joinGroup(group: Group) {
     if (!userId) { setErr('Sign in required'); return; }
-    setJoiningId(groupId);
-    const { error } = await supabase.from('group_members').insert({ group_id: groupId, user_id: userId, role: 'member' });
+    if (joinedCount >= MAX_GROUPS) { setErr('You can only be in 7 circles at a time. Leave one to join another.'); return; }
+
+    const requiredLevel = Number(group.requires_verification_level ?? 1);
+    if (myVerificationLevel < requiredLevel) {
+      setErr('This circle is for verified members only. Increase your verification level to join.');
+      return;
+    }
+
+    setJoiningId(group.id);
+    const { error } = await supabase.from('group_members').insert({ group_id: group.id, user_id: userId, role: 'member', status: 'active', last_joined_at: new Date().toISOString() });
     setJoiningId(null);
     
     if (!error || error.code === '23505') {
       const next = new Set(memberOf);
-      next.add(groupId);
+      next.add(group.id);
       setMemberOf(next);
+      setJoinedCount((c) => Math.min(MAX_GROUPS, c + (memberOf.has(group.id) ? 0 : 1)));
     } else {
-      setErr(error.message);
+      const text = (error.message || '').toLowerCase();
+      if (text.includes('group_join_limit')) setErr('You can only be in 7 circles at a time. Leave one to join another.');
+      else if (text.includes('verification')) setErr('This circle is for verified members only.');
+      else setErr(error.message);
     }
   }
 
@@ -201,6 +244,13 @@ export default function GroupsByGame() {
         <p className="mt-2 text-neutral-600">
             {rows.length} active group{rows.length !== 1 && 's'} found.
         </p>
+        <p className="mt-1 text-xs font-semibold text-neutral-500">Joined {joinedCount}/{MAX_GROUPS} circles.</p>
+        {err && (
+          <div className="mt-3 inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">
+            {err}
+            <button onClick={() => setErr(null)} className="text-red-500 hover:text-red-700">×</button>
+          </div>
+        )}
       </div>
 
       {/* Filters */}
@@ -284,11 +334,11 @@ export default function GroupsByGame() {
                              </Link>
                          ) : (
                              <button 
-                                onClick={() => joinGroup(g.id)}
-                                disabled={joiningId === g.id}
+                                onClick={() => joinGroup(g)}
+                                disabled={joiningId === g.id || joinedCount >= MAX_GROUPS}
                                 className="rounded-full bg-black px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-neutral-800 disabled:opacity-50 transition-all"
                              >
-                                {joiningId === g.id ? "Joining..." : "Join"}
+                                {joiningId === g.id ? "Joining..." : joinedCount >= MAX_GROUPS ? "Limit Reached" : "Join"}
                              </button>
                          )}
                     </div>

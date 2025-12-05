@@ -10,6 +10,7 @@ export type Profile = {
   city?: string | null;
   rating_avg?: number;
   rating_count?: number;
+  verification_level?: number | null;
 };
 
 export type Group = {
@@ -26,6 +27,7 @@ export type Group = {
   location?: string | null;
   capacity: number;
   visibility: string | null;
+  requires_verification_level?: number | null;
   is_online: boolean;
   online_link: string | null;
   created_at: string;
@@ -37,6 +39,7 @@ export type GroupMember = {
   group_id: string;
   role: string | null; // 'host', 'member'
   status: string;      // 'active', 'pending'
+  last_joined_at?: string | null;
   created_at: string;
   // Joined fields (optional because they aren't always fetched)
   profiles?: {
@@ -139,4 +142,29 @@ export type MyGroupRow = {
   created_at: string;
   game: string | null;
   code?: string | null;
+};
+
+export type GroupEvent = {
+  id: string;
+  group_id: string;
+  poll_id: string | null;
+  option_id: string | null;
+  title: string;
+  starts_at: string | null;
+  place: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GroupMoment = {
+  id: string;
+  group_id: string;
+  created_by: string;
+  photo_url: string;
+  caption?: string | null;
+  verified: boolean;
+  min_view_level: number | null;
+  created_at: string;
+  verified_at?: string | null;
 };
