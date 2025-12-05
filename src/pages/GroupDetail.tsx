@@ -302,24 +302,34 @@ export default function GroupDetail() {
         return; 
     }
 
+    let hadError = false;
+    let createdOptions: PollOption[] = [];
     if (labels.length) {
       const rows = labels.map(label => ({ poll_id: created.id, label }));
-      const { error: optError } = await supabase.from("group_poll_options").insert(rows);
+      const { data: optRows, error: optError } = await supabase
+        .from("group_poll_options")
+        .insert(rows)
+        .select("*")
+        .order("created_at");
       if (optError) {
          console.error("Option create error:", optError);
          setMsg("Poll created but failed to add options.");
+         hadError = true;
+      } else {
+         createdOptions = (optRows as PollOption[]) ?? [];
       }
     }
 
     setCreateOpen(false);
-    setMsg(null); // Clear error on success
+    if (!hadError) setMsg(null); // Clear error on success
     setPoll({ 
         id: created.id, group_id: group.id, 
         title: newTitle, status: "open", 
         closes_at: closesAt, created_by: auth.user.id 
     });
-    setOptions(labels.map((l, i) => ({ id: `temp-${i}`, poll_id: created.id, label: l, starts_at: null, place: null })));
+    setOptions(createdOptions);
     setCounts({});
+    setVotedCount(0);
   }
 
   async function finalizePoll() {
