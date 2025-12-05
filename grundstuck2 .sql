@@ -40,6 +40,7 @@ create table if not exists public.profiles (
   allow_ratings boolean default true,
   rating_avg    numeric default 0,
   rating_count  integer default 0,
+  verification_level smallint default 1 check (verification_level between 1 and 3),
   onboarded     boolean default false,
   created_at    timestamptz default now(),
   updated_at    timestamptz default now()
@@ -80,6 +81,7 @@ create table if not exists public.groups (
   code        text unique,
   created_at  timestamptz default now(),
   updated_at  timestamptz default now(),
+  requires_verification_level smallint default 1 check (requires_verification_level between 1 and 3),
   game_slug   text generated always as (
     lower(regexp_replace(coalesce(game,''), '[^a-z0-9]+', '', 'g'))
   ) stored
@@ -94,11 +96,17 @@ create table if not exists public.group_members (
   user_id    uuid not null references public.profiles(user_id) on delete cascade,
   role       text default 'member',
   status     text default 'active',
+  last_joined_at timestamptz default now(),
   created_at timestamptz default now(),
   unique (group_id, user_id)
 );
 create index if not exists gm_user_idx on public.group_members(user_id);
 create index if not exists gm_group_idx on public.group_members(group_id);
+
+-- Backfill new columns when missing (idempotent)
+alter table public.profiles add column if not exists verification_level smallint default 1 check (verification_level between 1 and 3);
+alter table public.groups add column if not exists requires_verification_level smallint default 1 check (requires_verification_level between 1 and 3);
+alter table public.group_members add column if not exists last_joined_at timestamptz default now();
 
 create table if not exists public.group_live_locations (
   group_id   uuid not null references public.groups(id) on delete cascade,
@@ -116,6 +124,37 @@ create table if not exists public.group_reads (
   last_read_at timestamptz not null default now(),
   primary key (group_id, user_id)
 );
+
+-- ---------------------------------------------------------------------
+-- Group Moments (inspiration feed) & Events
+-- ---------------------------------------------------------------------
+create table if not exists public.group_moments (
+  id               uuid primary key default gen_random_uuid(),
+  group_id         uuid not null references public.groups(id) on delete cascade,
+  created_by       uuid not null references public.profiles(user_id) on delete cascade,
+  photo_url        text not null,
+  caption          text,
+  verified         boolean default false,
+  min_view_level   smallint default 1 check (min_view_level between 1 and 3),
+  created_at       timestamptz default now(),
+  verified_at      timestamptz,
+  presence_note    text
+);
+create index if not exists idx_group_moments_group on public.group_moments(group_id, created_at desc);
+
+create table if not exists public.group_events (
+  id         uuid primary key default gen_random_uuid(),
+  group_id   uuid not null references public.groups(id) on delete cascade,
+  poll_id    uuid unique references public.group_polls(id) on delete set null,
+  option_id  uuid references public.group_poll_options(id) on delete set null,
+  title      text not null,
+  starts_at  timestamptz,
+  place      text,
+  created_by uuid not null references public.profiles(user_id) on delete cascade,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+create index if not exists idx_group_events_group on public.group_events(group_id, starts_at);
 
 -- ---------------------------------------------------------------------
 -- Chat (messages, reactions, reads)
@@ -484,6 +523,115 @@ begin
 end;
 $$;
 
+-- Maintain last_joined_at + enforce scarcity / verification
+create or replace function public.set_member_last_joined()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op = 'INSERT' then
+    if new.last_joined_at is null then new.last_joined_at := now(); end if;
+  elsif tg_op = 'UPDATE' then
+    if new.status in ('active','accepted') and (old.status is distinct from new.status or new.last_joined_at is null) then
+      new.last_joined_at := now();
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function public.enforce_group_membership_cap()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  active_count integer;
+begin
+  if new.status not in ('active','accepted') then
+    return new;
+  end if;
+
+  select count(*) into active_count
+  from public.group_members gm
+  where gm.user_id = new.user_id
+    and gm.status in ('active','accepted')
+    and gm.group_id <> new.group_id;
+
+  if active_count >= 7 then
+    raise exception 'group_join_limit' using errcode='P0001', detail='User already in 7 circles';
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function public.enforce_group_verification_level()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  req smallint;
+  lvl smallint;
+begin
+  if new.status not in ('active','accepted') then
+    return new;
+  end if;
+
+  select requires_verification_level into req from public.groups where id = new.group_id;
+  select verification_level into lvl from public.profiles where user_id = new.user_id;
+
+  if coalesce(lvl, 1) < coalesce(req, 1) then
+    raise exception 'verification_required' using errcode='P0001', detail='Verification level too low';
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function public.touch_group_activity(p_gid uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.groups set updated_at = now() where id = p_gid;
+end;
+$$;
+
+create or replace function public.bump_group_activity_from_child()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform public.touch_group_activity(new.group_id);
+  return new;
+end;
+$$;
+
+create or replace function public.enforce_leave_cooldown()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not exists (select 1 from public.groups g where g.id = old.group_id) then
+    return old;
+  end if;
+  if old.last_joined_at is not null and old.last_joined_at > (now() - interval '12 hours') then
+    raise exception 'leave_cooldown' using errcode='P0001', detail='Membership cooldown active';
+  end if;
+  return old;
+end;
+$$;
+
 drop trigger if exists trg_groups_owner_defaults on public.groups;
 create trigger trg_groups_owner_defaults before insert on public.groups for each row execute function public.set_group_owner_defaults();
 
@@ -508,8 +656,41 @@ create trigger on_group_created after insert on public.groups for each row execu
 drop trigger if exists trg_group_members_normalize on public.group_members;
 create trigger trg_group_members_normalize before insert or update on public.group_members for each row execute function public.normalize_member_status();
 
+drop trigger if exists trg_group_members_last_joined on public.group_members;
+create trigger trg_group_members_last_joined before insert or update on public.group_members for each row execute function public.set_member_last_joined();
+
+drop trigger if exists trg_group_members_limit on public.group_members;
+create trigger trg_group_members_limit before insert or update on public.group_members for each row execute function public.enforce_group_membership_cap();
+
+drop trigger if exists trg_group_members_verify on public.group_members;
+create trigger trg_group_members_verify before insert or update on public.group_members for each row execute function public.enforce_group_verification_level();
+
+drop trigger if exists trg_members_touch_group on public.group_members;
+create trigger trg_members_touch_group after insert on public.group_members for each row execute function public.bump_group_activity_from_child();
+
+drop trigger if exists trg_group_members_cooldown on public.group_members;
+create trigger trg_group_members_cooldown before delete on public.group_members for each row execute function public.enforce_leave_cooldown();
+
 drop trigger if exists trg_votes_check_option on public.group_votes;
 create trigger trg_votes_check_option before insert or update on public.group_votes for each row execute function public.check_vote_option_same_poll();
+
+drop trigger if exists trg_messages_touch_group on public.group_messages;
+create trigger trg_messages_touch_group after insert on public.group_messages for each row execute function public.bump_group_activity_from_child();
+
+drop trigger if exists trg_polls_touch_group on public.group_polls;
+create trigger trg_polls_touch_group after insert on public.group_polls for each row execute function public.bump_group_activity_from_child();
+
+drop trigger if exists trg_votes_touch_group on public.group_votes;
+create trigger trg_votes_touch_group after insert on public.group_votes for each row execute function public.bump_group_activity_from_child();
+
+drop trigger if exists trg_moments_touch_group on public.group_moments;
+create trigger trg_moments_touch_group after insert on public.group_moments for each row execute function public.bump_group_activity_from_child();
+
+drop trigger if exists trg_events_touch_group on public.group_events;
+create trigger trg_events_touch_group after insert or update on public.group_events for each row execute function public.bump_group_activity_from_child();
+
+drop trigger if exists trg_group_events_touch_updated on public.group_events;
+create trigger trg_group_events_touch_updated before update on public.group_events for each row execute function public.touch_updated_at();
 
 -- ---------------------------------------------------------------------
 -- RLS policies
@@ -666,6 +847,22 @@ with check (
 );
 drop policy if exists votes_delete_own on public.group_votes;
 create policy votes_delete_own on public.group_votes for delete to authenticated using (user_id = auth.uid());
+
+alter table public.group_moments enable row level security;
+drop policy if exists gmom_select on public.group_moments;
+create policy gmom_select on public.group_moments for select to public using (true);
+drop policy if exists gmom_insert_member on public.group_moments;
+create policy gmom_insert_member on public.group_moments for insert to authenticated with check (public.is_group_member(group_id));
+drop policy if exists gmom_delete_owner on public.group_moments;
+create policy gmom_delete_owner on public.group_moments for delete to authenticated using (public.is_group_host(group_id) or created_by = auth.uid());
+
+alter table public.group_events enable row level security;
+drop policy if exists gevents_select on public.group_events;
+create policy gevents_select on public.group_events for select to authenticated using (public.is_group_member(group_id));
+drop policy if exists gevents_insert_host on public.group_events;
+create policy gevents_insert_host on public.group_events for insert to authenticated with check (public.is_group_host(group_id));
+drop policy if exists gevents_update_host on public.group_events;
+create policy gevents_update_host on public.group_events for update to authenticated using (public.is_group_host(group_id)) with check (public.is_group_host(group_id));
 
 alter table public.friendships enable row level security;
 drop policy if exists fr_select_participants on public.friendships;
@@ -1062,15 +1259,18 @@ begin
 
   insert into public.group_members (group_id, user_id, role, status)
   values (v_inv.group_id, auth.uid(), 'member', 'active')
-  on conflict (group_id, user_id) do update set status = 'active';
+  on conflict (group_id, user_id) do update set status = 'active', last_joined_at = now();
 
   update public.group_invites set use_count = coalesce(use_count,0) + 1 where code = v_inv.code;
   return v_inv.group_id;
 end;
 $$;
 
+-- drop old signature to allow return type changes
+drop function if exists public.resolve_poll(uuid);
+
 create or replace function public.resolve_poll(p_poll_id uuid)
-returns void
+returns public.group_events
 language plpgsql
 security definer
 set search_path = public
@@ -1078,17 +1278,53 @@ as $$
 declare
   v_group uuid;
   v_creator uuid;
+  v_title text;
+  v_winner uuid;
+  v_event public.group_events;
 begin
-  select group_id, created_by into v_group, v_creator from public.group_polls where id = p_poll_id;
+  select group_id, created_by, title into v_group, v_creator, v_title from public.group_polls where id = p_poll_id;
   if v_group is null then raise exception 'poll_not_found'; end if;
   if not public.is_group_host(v_group) and v_creator <> auth.uid() then
     raise exception 'not_allowed';
   end if;
+
+  select o.id
+    into v_winner
+    from public.group_poll_options o
+    left join lateral (select count(*) as c from public.group_votes v where v.option_id = o.id) x on true
+    where o.poll_id = p_poll_id
+    order by coalesce(x.c, 0) desc, o.created_at
+    limit 1;
+
   update public.group_polls
     set status = 'closed',
         closes_at = coalesce(closes_at, now())
     where id = p_poll_id;
+
+  if v_winner is not null then
+    insert into public.group_events (group_id, poll_id, option_id, title, starts_at, place, created_by)
+    select v_group, p_poll_id, v_winner, coalesce(v_title, 'Event'), o.starts_at, o.place, auth.uid()
+    from public.group_poll_options o
+    where o.id = v_winner
+    on conflict (poll_id)
+    do update set option_id = excluded.option_id, title = excluded.title, starts_at = excluded.starts_at, place = excluded.place, updated_at = now()
+    returning * into v_event;
+  end if;
+
+  perform public.touch_group_activity(v_group);
+  return v_event;
 end;
+$$;
+
+create or replace function public.cleanup_inactive_groups()
+returns setof uuid
+language sql
+security definer
+set search_path = public
+as $$
+  delete from public.groups
+   where updated_at < (now() - interval '14 days')
+  returning id;
 $$;
 
 -- ---------------------------------------------------------------------
