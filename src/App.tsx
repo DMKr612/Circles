@@ -5,7 +5,6 @@ import React, {
   useEffect,
   useMemo,
   useState,
-  lazy,
   Suspense,
   type PropsWithChildren,
 } from "react";
@@ -24,36 +23,21 @@ import Layout from "@/components/Layout";
 import { useProfile } from "@/hooks/useProfile";
 
 
-// Pages (lazy imports)
-
-const BrowsePage = lazy(() => import("./pages/Browse"));
-const CreateGroup = lazy(() => import("./pages/CreateGroup"));
-const GroupDetail = lazy(() => import("./pages/GroupDetail"));
-const Groups = lazy(() => import("./pages/Groups"));
-const Profile = lazy(() => import("./pages/Profile"));
-const ProfileCreation = lazy(() => import("./pages/ProfileCreation.tsx"));
-const GroupsByGame = lazy(() => import("./pages/groups/GroupsByGame"));
-const MyGroups = lazy(() => import("./pages/groups/MyGroups"));
-const Onboarding = lazy(() => import("./pages/Onboarding"));
-const JoinByCode = lazy(() => import("./pages/JoinByCode"));
-const NotificationsPage = lazy(() => import("./pages/Notifications"));
-const Chats = lazy(() => import("./pages/Chats"));
-const Legal = lazy(() => import("./pages/Legal"));
-const AuthCallback = lazy(() => import("./pages/AuthCallback"));
-
-// ---- Route prefetch helpers (Step 1) ----
-const routePrefetchers: Record<string, () => void> = {
-  "/onboarding": () => { import("./pages/Onboarding"); },
-  "/browse":     () => { import("./pages/Browse"); },
-  "/profile":    () => { import("./pages/Profile"); },
-  "/create":     () => { import("./pages/CreateGroup"); },
-  "/groups":     () => { import("./pages/Groups"); },
-  "/groups/mine":() => { import("./pages/groups/MyGroups"); },
-};
-function prefetchRoute(path: string) {
-  try { routePrefetchers[path]?.(); } catch {}
-}
-// ---- End prefetch helpers ----
+// Pages (statically imported to avoid missing dynamic chunks on GH Pages)
+import BrowsePage from "./pages/Browse";
+import CreateGroup from "./pages/CreateGroup";
+import GroupDetail from "./pages/GroupDetail";
+import Groups from "./pages/Groups";
+import Profile from "./pages/Profile";
+import ProfileCreation from "./pages/ProfileCreation";
+import GroupsByGame from "./pages/groups/GroupsByGame";
+import MyGroups from "./pages/groups/MyGroups";
+import Onboarding from "./pages/Onboarding";
+import JoinByCode from "./pages/JoinByCode";
+import NotificationsPage from "./pages/Notifications";
+import Chats from "./pages/Chats";
+import Legal from "./pages/Legal";
+import AuthCallback from "./pages/AuthCallback";
 
 /* =========================
    Auth (single source)
@@ -145,7 +129,6 @@ function BottomNav() {
       <nav className="flex h-16 items-center justify-around px-6">
         <Link
           to="/browse"
-          onMouseEnter={() => prefetchRoute("/browse")}
           className={`group flex flex-col items-center justify-center gap-1 transition-all duration-200 ${
             isActive("/browse") ? "text-black" : "text-neutral-400 hover:text-neutral-600"
           }`}
@@ -159,7 +142,6 @@ function BottomNav() {
         
         <Link
           to="/create"
-          onMouseEnter={() => prefetchRoute("/create")}
           className={`group flex flex-col items-center justify-center gap-1 transition-all duration-200 ${
             isActive("/create") ? "text-black" : "text-neutral-400 hover:text-neutral-600"
           }`}
@@ -173,7 +155,6 @@ function BottomNav() {
 
         <Link
           to="/profile"
-          onMouseEnter={() => prefetchRoute("/profile")}
            className={`group flex flex-col items-center justify-center gap-1 transition-all duration-200 ${
             isActive("/profile") ? "text-black" : "text-neutral-400 hover:text-neutral-600"
           }`}
