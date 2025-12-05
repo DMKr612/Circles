@@ -66,7 +66,7 @@ export default function JoinByCode() {
 }
 
 function readableError(raw: string): string {
-  const s = raw.toLowerCase();
+  const s = (raw || "").toLowerCase();
   if (s.includes("permission") || s.includes("rls")) return "You don’t have permission to join this group.";
   if (s.includes("not found") || s.includes("no rows")) return "Invite not found.";
   if (s.includes("expired")) return "Invite expired.";

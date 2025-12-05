@@ -82,7 +82,7 @@ export default function Chats() {
             items.push({
               type: 'group',
               id: g.groups.id,
-              name: g.groups.title,
+              name: g.groups.title || "Group",
               avatar_url: null,
               subtitle: g.groups.category || 'Group',
               isFavorite: favs.has(g.groups.id)
@@ -277,6 +277,7 @@ export default function Chats() {
       if(filter === "groups" && item.type !== "group") return false;
       if(filter === "private" && item.type !== "dm") return false;
       if(filter === "fav" && !item.isFavorite) return false;
+      if (!item.name) return false;
       if(!item.name.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
