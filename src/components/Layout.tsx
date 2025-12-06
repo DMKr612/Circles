@@ -5,62 +5,61 @@ export default function Layout() {
   const location = useLocation();
   const active = location.pathname;
 
-  // Helper for styling:
-  // - 'transition-transform duration-150': Smooth movement
-  // - 'active:scale-90': The click animation (shrinks icon when pressed)
   const isActive = (path: string) =>
     active === path || active.startsWith(`${path}/`);
 
-  const getLinkClass = (path: string) => 
-    `flex flex-col items-center p-2 transition-transform duration-150 ease-in-out active:scale-90 ${
-      isActive(path) ? 'text-black scale-105 font-semibold' : 'text-gray-400 hover:text-gray-600'
-    }`;
+  const links = [
+    { to: "/chats", label: "Chats", icon: MessageSquare },
+    { to: "/groups", label: "Groups", icon: Users },
+    { to: "/browse", label: "Browse", icon: Compass },
+    { to: "/notifications", label: "Activity", icon: Bell },
+    { to: "/profile", label: "Profile", icon: User },
+  ];
 
   return (
-    <>
-      {/* Main content wrapper with padding to avoid nav overlap */}
-      <div className="pb-[calc(64px+env(safe-area-inset-bottom))]"> 
+    <div className="relative min-h-dvh bg-gradient-to-b from-[#f7f9fb] via-white to-[#eef2ff] text-slate-900">
+      {/* Ambient color washes */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -top-24 -left-20 h-64 w-64 rounded-full bg-[radial-gradient(circle_at_center,#a5b4fc,transparent_55%)] opacity-60 blur-3xl" />
+        <div className="absolute top-[30%] right-[-6rem] h-72 w-72 rounded-full bg-[radial-gradient(circle_at_center,#c7d2fe,transparent_55%)] opacity-50 blur-3xl" />
+        <div className="absolute bottom-[-4rem] left-[-2rem] h-72 w-72 rounded-full bg-[radial-gradient(circle_at_center,#b8ffec,transparent_55%)] opacity-40 blur-3xl" />
+      </div>
+
+      {/* Main content wrapper with generous padding for the nav */}
+      <div className="relative z-10 pb-[calc(120px+env(safe-area-inset-bottom))]">
         <Outlet />
       </div>
 
       {/* Bottom Navigation Bar */}
-      <nav className="fixed bottom-0 left-0 right-0 z-[100] border-t border-gray-200 bg-white/95 backdrop-blur-lg pb-[env(safe-area-inset-bottom)]">
-        <div className="mx-auto flex h-16 max-w-md items-center justify-around px-2">
-          
-          {/* 1. Chats (Left) */}
-          <Link to="/chats" className={getLinkClass('/chats')}>
-             <MessageSquare className="h-6 w-6" />
-             <span className="text-[10px] font-medium">Chats</span>
-          </Link>
-
-          {/* 2. My Groups */}
-          <Link to="/groups" className={getLinkClass('/groups')}>
-            <Users className="h-6 w-6" />
-            <span className="text-[10px] font-medium">Groups</span>
-          </Link>
-
-          {/* 3. Browse (Center - Featured) */}
-          <Link to="/browse" className={getLinkClass('/browse')}>
-            <div className={`rounded-full p-1 -mt-1 transition-colors ${isActive('/browse') ? 'bg-gray-100' : ''}`}>
-                <Compass className="h-7 w-7" /> 
-            </div>
-            <span className="text-[10px] font-medium">Browse</span>
-          </Link>
-
-          {/* 4. Activity */}
-          <Link to="/notifications" className={getLinkClass('/notifications')}>
-            <Bell className="h-6 w-6" />
-            <span className="text-[10px] font-medium">Activity</span>
-          </Link>
-
-          {/* 5. Profile */}
-          <Link to="/profile" className={getLinkClass('/profile')}>
-            <User className="h-6 w-6" />
-            <span className="text-[10px] font-medium">Profile</span>
-          </Link>
-
+      <nav className="fixed bottom-4 left-0 right-0 z-[100] px-4 pb-[env(safe-area-inset-bottom)]">
+        <div className="mx-auto max-w-xl rounded-[28px] border border-white/70 bg-white/80 backdrop-blur-2xl shadow-[0_10px_50px_rgba(15,23,42,0.12)]">
+          <div className="flex h-[74px] items-center justify-around px-2">
+            {links.map(({ to, label, icon: Icon }) => {
+              const activeTab = isActive(to);
+              return (
+                <Link
+                  key={to}
+                  to={to}
+                  className="group flex flex-col items-center gap-1 text-[11px] font-medium text-slate-500 transition-all duration-150"
+                >
+                  <span
+                    className={`grid h-11 w-11 place-items-center rounded-2xl border transition-all duration-200 ${
+                      activeTab
+                        ? "border-transparent bg-gradient-to-br from-indigo-500 via-purple-500 to-teal-400 text-white shadow-lg shadow-indigo-500/30"
+                        : "border-white/70 bg-white/70 text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <span className={activeTab ? "text-slate-900" : "text-slate-500 group-hover:text-slate-800"}>
+                    {label}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
         </div>
       </nav>
-    </>
+    </div>
   );
 }

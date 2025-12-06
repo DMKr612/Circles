@@ -247,8 +247,8 @@ export default function App() {
       <AuthProvider>
           {/* Support Button - Styled cleaner */}
           <button
-            onClick={() => window.open("mailto:support@yourdomain.com?subject=Help%20with%20Circles%20App", "_blank")}
-            className="fixed top-4 right-4 z-50 grid h-10 w-10 place-items-center rounded-full bg-white text-neutral-600 shadow-md ring-1 ring-black/5 transition-transform hover:scale-105 hover:text-black"
+            onClick={() => window.open("mailto:support@meincircles.com?subject=Help%20with%20Circles%20App", "_blank")}
+            className="fixed top-4 right-4 z-50 grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-indigo-500 via-purple-500 to-teal-400 text-white shadow-lg shadow-indigo-500/30 ring-1 ring-white/40 transition-all duration-200 hover:-translate-y-0.5 hover:scale-105"
             title="Support"
             aria-label="Support"
           >
