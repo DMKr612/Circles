@@ -120,9 +120,11 @@ export default function Onboarding() {
   // keyboard navigation
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "ArrowRight") next();
-      if (e.key === "ArrowLeft") back();
-      if (e.key.toLowerCase() === "escape") skip();
+      const key = e.key?.toLowerCase?.();
+      if (!key) return;
+      if (key === "arrowright") next();
+      if (key === "arrowleft") back();
+      if (key === "escape") skip();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
